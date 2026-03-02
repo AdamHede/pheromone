@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>SWARM</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game-canvas"></canvas>
+
+  <div id="ui-overlay">
+    <div id="map-title"></div>
+    <div id="map-description"></div>
+    <div id="hive-count"></div>
+    <div id="timer-display"></div>
+    <div id="food-counter"></div>
+
+    <button id="go-button">GO</button>
+
+    <div class="hint-text" id="hint-text">click to place hive</div>
+
+    <div id="score-display">
+      <div id="score-food"></div>
+      <div id="score-stars"></div>
+      <div id="score-metrics"></div>
+      <div id="score-actions">
+        <button id="btn-retry">RETRY</button>
+        <button id="btn-watch">WATCH AGAIN</button>
+        <button id="btn-next">NEXT</button>
+      </div>
+    </div>
+
+    <div id="map-select"></div>
+  </div>
+
+  <!-- Scripts in dependency order -->
+  <script src="utils.js"></script>
+  <script src="pheromone.js"></script>
+  <script src="map.js"></script>
+  <script src="bee.js"></script>
+  <script src="particles.js"></script>
+  <script src="audio.js"></script>
+  <script src="renderer.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>

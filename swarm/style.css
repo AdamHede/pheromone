@@ -1,0 +1,212 @@
+/* SWARM — style.css */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #000;
+  overflow: hidden;
+  font-family: 'Space Mono', monospace;
+  color: rgba(255, 255, 255, 0.6);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+canvas {
+  display: block;
+  cursor: none;
+}
+
+#ui-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+#map-title {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  opacity: 0.35;
+  transition: opacity 0.5s;
+}
+
+#map-description {
+  position: absolute;
+  top: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  letter-spacing: 1px;
+  opacity: 0.25;
+  transition: opacity 0.5s;
+}
+
+#hive-count {
+  position: absolute;
+  top: 20px;
+  right: 30px;
+  font-size: 11px;
+  letter-spacing: 2px;
+  opacity: 0.4;
+}
+
+#timer-display {
+  position: absolute;
+  top: 20px;
+  right: 30px;
+  font-size: 11px;
+  letter-spacing: 2px;
+  opacity: 0.35;
+  display: none;
+}
+
+#food-counter {
+  position: absolute;
+  top: 38px;
+  right: 30px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  opacity: 0.3;
+  display: none;
+}
+
+#go-button {
+  position: absolute;
+  bottom: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  background: transparent;
+  border: 1px solid rgba(255, 200, 100, 0.3);
+  color: rgba(255, 200, 100, 0.6);
+  font-family: 'Space Mono', monospace;
+  font-size: 13px;
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  padding: 12px 40px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: none;
+}
+
+#go-button:hover {
+  border-color: rgba(255, 200, 100, 0.6);
+  color: rgba(255, 200, 100, 0.9);
+  background: rgba(255, 200, 100, 0.05);
+}
+
+#score-display {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  display: none;
+  opacity: 0;
+  transition: opacity 1s ease;
+}
+
+#score-display.visible {
+  opacity: 1;
+}
+
+#score-food {
+  font-size: 28px;
+  letter-spacing: 4px;
+  color: rgba(255, 220, 120, 0.8);
+  margin-bottom: 8px;
+}
+
+#score-stars {
+  font-size: 24px;
+  margin-bottom: 16px;
+  color: rgba(255, 200, 80, 0.7);
+  letter-spacing: 6px;
+}
+
+#score-metrics {
+  font-size: 10px;
+  letter-spacing: 1px;
+  opacity: 0.35;
+  line-height: 1.8;
+  margin-bottom: 30px;
+}
+
+#score-actions {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+}
+
+#score-actions button {
+  pointer-events: auto;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.5);
+  font-family: 'Space Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  padding: 8px 24px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+#score-actions button:hover {
+  border-color: rgba(255, 200, 100, 0.4);
+  color: rgba(255, 200, 100, 0.7);
+}
+
+#map-select {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  gap: 8px;
+  align-items: center;
+}
+
+#map-select button {
+  pointer-events: auto;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.35);
+  font-family: 'Space Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+#map-select button:hover {
+  border-color: rgba(255, 200, 100, 0.3);
+  color: rgba(255, 200, 100, 0.6);
+}
+
+#map-select button.active {
+  border-color: rgba(255, 200, 100, 0.4);
+  color: rgba(255, 200, 100, 0.7);
+}
+
+.hint-text {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  letter-spacing: 2px;
+  opacity: 0.2;
+  text-transform: uppercase;
+}
