@@ -19,9 +19,9 @@ class Renderer {
     this.PHEROMONE_RENDER_INTERVAL = 2;
 
     // Pre-rendered glow sprites (at DPR resolution for crisp gradients)
-    this.beeGlowSearching = this._createGlowSprite(12, [255, 235, 180], 0.7);
-    this.beeGlowReturning = this._createGlowSprite(16, [255, 200, 80], 0.9);
-    this.beeGlowFollowing = this._createGlowSprite(14, [255, 215, 120], 0.8);
+    this.beeGlowSearching = this._createGlowSprite(9, [255, 235, 180], 0.7);
+    this.beeGlowReturning = this._createGlowSprite(12, [255, 200, 80], 0.9);
+    this.beeGlowFollowing = this._createGlowSprite(10, [255, 215, 120], 0.8);
     this.hiveGlowSprite = this._createGlowSprite(70, [255, 190, 80], 0.6);
 
     // Background grain (intentionally low-res, stays at logical/4)
@@ -50,9 +50,9 @@ class Renderer {
     this.height = this.canvas.height / dpr;
 
     // Regenerate glow sprites at new DPR resolution
-    this.beeGlowSearching = this._createGlowSprite(12, [255, 235, 180], 0.7);
-    this.beeGlowReturning = this._createGlowSprite(16, [255, 200, 80], 0.9);
-    this.beeGlowFollowing = this._createGlowSprite(14, [255, 215, 120], 0.8);
+    this.beeGlowSearching = this._createGlowSprite(9, [255, 235, 180], 0.7);
+    this.beeGlowReturning = this._createGlowSprite(12, [255, 200, 80], 0.9);
+    this.beeGlowFollowing = this._createGlowSprite(10, [255, 215, 120], 0.8);
     this.hiveGlowSprite = this._createGlowSprite(70, [255, 190, 80], 0.6);
 
     // Resize grain canvas
@@ -227,7 +227,7 @@ class Renderer {
       const b = lerp(eB, rB, recRatio);
 
       // Brightness proportional to concentration
-      const brightness = clamp(total * 3.0, 0, 1);
+      const brightness = clamp(total * 2.5, 0, 1);
 
       data[pixIdx]     = Math.floor(r * brightness * 255);
       data[pixIdx + 1] = Math.floor(g * brightness * 255);
@@ -350,7 +350,7 @@ class Renderer {
         ctx.fillStyle = bee.state === BeeState.RETURNING
           ? 'rgb(255, 200, 80)'
           : 'rgb(255, 235, 180)';
-        ctx.fillRect(pos.x - 0.75, pos.y - 0.75, 1.5, 1.5);
+        ctx.fillRect(pos.x - 0.5, pos.y - 0.5, 1.0, 1.0);
       }
 
       ctx.globalAlpha = 1;
@@ -359,16 +359,16 @@ class Renderer {
       let sprite, spriteSize;
       if (bee.state === BeeState.RETURNING) {
         sprite = this.beeGlowReturning;
-        spriteSize = 16;
+        spriteSize = 12;
       } else {
         sprite = this.beeGlowSearching;
-        spriteSize = 12;
+        spriteSize = 9;
       }
 
       ctx.drawImage(sprite, bee.x - spriteSize, bee.y - spriteSize, spriteSize * 2, spriteSize * 2);
 
       // Bright core
-      const coreSize = bee.state === BeeState.RETURNING ? 2.5 : 2;
+      const coreSize = bee.state === BeeState.RETURNING ? 1.8 : 1.4;
       ctx.fillStyle = bee.state === BeeState.RETURNING
         ? 'rgb(255, 220, 100)'
         : 'rgb(255, 245, 200)';

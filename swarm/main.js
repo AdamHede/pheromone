@@ -8,8 +8,8 @@ const CANVAS_WIDTH = 1280;
 const CANVAS_HEIGHT = 720;
 const SIM_TICKS_PER_SECOND = 60;
 const FIXED_DT = 1000 / SIM_TICKS_PER_SECOND;
-const DIFFUSION_RATE = 0.15;
-const EVAPORATION_RATE = 0.995;
+const DIFFUSION_RATE = 0.2;
+const EVAPORATION_RATE = 0.993;
 
 // === Game Phases ===
 const GamePhase = {
@@ -197,7 +197,7 @@ function loadCurrentMap() {
   state.rng = new SeededRandom(state.seed);
 
   // Create pheromone grid
-  state.pheromoneGrid = new PheromoneGrid(CANVAS_WIDTH, CANVAS_HEIGHT, 6);
+  state.pheromoneGrid = new PheromoneGrid(CANVAS_WIDTH, CANVAS_HEIGHT, 4);
 
   // Create particles
   state.particles = new ParticleSystem(state.rng);
