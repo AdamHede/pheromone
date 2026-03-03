@@ -51,16 +51,54 @@ let elMapTitle, elMapDesc, elHiveCount, elTimerDisplay, elFoodCounter;
 let elGoButton, elHintText, elScoreDisplay, elScoreFood, elScoreStars;
 let elScoreMetrics, elBtnRetry, elBtnWatch, elBtnNext, elMapSelect;
 
+// === Mobile Detection ===
+const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+
+// === Canvas Sizing (letterbox to maintain 16:9) ===
+function resizeCanvas() {
+  const windowW = window.innerWidth;
+  const windowH = window.innerHeight;
+  const gameAspect = CANVAS_WIDTH / CANVAS_HEIGHT; // 16:9
+  const windowAspect = windowW / windowH;
+
+  let cssWidth, cssHeight;
+  if (windowAspect > gameAspect) {
+    // Window is wider than game — pillarbox (black bars on sides)
+    cssHeight = windowH;
+    cssWidth = windowH * gameAspect;
+  } else {
+    // Window is taller than game — letterbox (black bars top/bottom)
+    cssWidth = windowW;
+    cssHeight = windowW / gameAspect;
+  }
+
+  canvas.style.width = cssWidth + 'px';
+  canvas.style.height = cssHeight + 'px';
+  canvas.style.position = 'absolute';
+  canvas.style.left = ((windowW - cssWidth) / 2) + 'px';
+  canvas.style.top = ((windowH - cssHeight) / 2) + 'px';
+
+  // Reposition overlay to match canvas
+  const overlay = document.getElementById('ui-overlay');
+  if (overlay) {
+    overlay.style.width = cssWidth + 'px';
+    overlay.style.height = cssHeight + 'px';
+    overlay.style.left = canvas.style.left;
+    overlay.style.top = canvas.style.top;
+  }
+}
+
 // === Initialization ===
 function init() {
   canvas = document.getElementById('game-canvas');
 
-  // Size canvas to window
-  const dpr = window.devicePixelRatio || 1;
+  // Size canvas: internal resolution is always 1280x720
   canvas.width = CANVAS_WIDTH;
   canvas.height = CANVAS_HEIGHT;
-  canvas.style.width = '100vw';
-  canvas.style.height = '100vh';
+
+  // Fit canvas with correct aspect ratio (letterboxing)
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
 
   // Get DOM elements
   elMapTitle = document.getElementById('map-title');
@@ -161,6 +199,7 @@ function loadCurrentMap() {
   updateHiveCount();
   elGoButton.style.display = 'none';
   elHintText.style.display = 'block';
+  elHintText.textContent = isTouchDevice ? 'tap to place hive' : 'click to place hive';
   elScoreDisplay.style.display = 'none';
   elScoreDisplay.classList.remove('visible');
   elTimerDisplay.style.display = 'none';
@@ -185,7 +224,14 @@ function updateHiveCount() {
 }
 
 // === Input ===
+let touchStartTime = 0;
+let touchStartPos = { x: 0, y: 0 };
+let longPressTimer = null;
+const LONG_PRESS_MS = 500;
+const TAP_MOVE_THRESHOLD = 15; // px in game coords
+
 function setupInput() {
+  // Mouse events (desktop)
   canvas.addEventListener('click', onCanvasClick);
   canvas.addEventListener('contextmenu', onCanvasRightClick);
   canvas.addEventListener('mousemove', onCanvasMouseMove);
@@ -200,15 +246,111 @@ function setupInput() {
     }
   });
 
-  // Touch support
-  canvas.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    const touch = e.touches[0];
-    const rect = canvas.getBoundingClientRect();
-    const x = (touch.clientX - rect.left) * (CANVAS_WIDTH / rect.width);
-    const y = (touch.clientY - rect.top) * (CANVAS_HEIGHT / rect.height);
-    handlePlacement(x, y);
-  });
+  // Touch events (mobile)
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+  canvas.addEventListener('touchcancel', onTouchCancel, { passive: false });
+}
+
+function getTouchCanvasCoords(touch) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (touch.clientX - rect.left) * (CANVAS_WIDTH / rect.width),
+    y: (touch.clientY - rect.top) * (CANVAS_HEIGHT / rect.height),
+  };
+}
+
+function onTouchStart(e) {
+  e.preventDefault();
+  if (e.touches.length === 0) return;
+  const touch = e.touches[0];
+  const { x, y } = getTouchCanvasCoords(touch);
+
+  touchStartTime = Date.now();
+  touchStartPos = { x, y };
+
+  // Show cursor preview during placement
+  if (state.phase === GamePhase.PLACEMENT) {
+    renderer.setCursor(x, y, true);
+  }
+
+  // Start long-press timer for hive removal
+  clearTimeout(longPressTimer);
+  longPressTimer = setTimeout(() => {
+    if (state.phase === GamePhase.PLACEMENT) {
+      // Long press: remove nearest hive
+      let nearestIdx = -1;
+      let nearestDist = 50; // Slightly larger radius for touch
+      for (let i = 0; i < state.hives.length; i++) {
+        const d = vecDist(touchStartPos, state.hives[i]);
+        if (d < nearestDist) {
+          nearestDist = d;
+          nearestIdx = i;
+        }
+      }
+      if (nearestIdx >= 0) {
+        state.hives.splice(nearestIdx, 1);
+        updateHiveCount();
+        elGoButton.style.display = 'none';
+        elHintText.style.display = 'block';
+        elHintText.textContent = 'tap to place hive';
+        // Haptic feedback if available
+        if (navigator.vibrate) navigator.vibrate(30);
+      }
+    }
+    longPressTimer = null;
+  }, LONG_PRESS_MS);
+}
+
+function onTouchMove(e) {
+  e.preventDefault();
+  if (e.touches.length === 0) return;
+  const touch = e.touches[0];
+  const { x, y } = getTouchCanvasCoords(touch);
+
+  // Cancel long-press if finger moved too far
+  if (longPressTimer) {
+    const dx = x - touchStartPos.x;
+    const dy = y - touchStartPos.y;
+    if (Math.sqrt(dx * dx + dy * dy) > TAP_MOVE_THRESHOLD) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  }
+
+  // Update cursor preview
+  if (state.phase === GamePhase.PLACEMENT) {
+    renderer.setCursor(x, y, true);
+  }
+}
+
+function onTouchEnd(e) {
+  e.preventDefault();
+
+  // If long-press already fired, don't also do a tap
+  if (longPressTimer === null && (Date.now() - touchStartTime) >= LONG_PRESS_MS) {
+    renderer.setCursor(0, 0, false);
+    return;
+  }
+
+  clearTimeout(longPressTimer);
+  longPressTimer = null;
+
+  // Short tap: place hive
+  const elapsed = Date.now() - touchStartTime;
+  if (elapsed < LONG_PRESS_MS) {
+    handlePlacement(touchStartPos.x, touchStartPos.y);
+  }
+
+  renderer.setCursor(0, 0, false);
+}
+
+function onTouchCancel(e) {
+  e.preventDefault();
+  clearTimeout(longPressTimer);
+  longPressTimer = null;
+  renderer.setCursor(0, 0, false);
 }
 
 function getCanvasCoords(e) {
@@ -244,6 +386,7 @@ function onCanvasRightClick(e) {
     updateHiveCount();
     elGoButton.style.display = 'none';
     elHintText.style.display = 'block';
+    elHintText.textContent = 'click to place hive';
   }
 }
 
@@ -256,12 +399,14 @@ function handlePlacement(x, y) {
   if (state.phase !== GamePhase.PLACEMENT) return;
 
   // Check if clicking on existing hive (remove it)
+  const removeDist = isTouchDevice ? 35 : 25; // Larger target for touch
   for (let i = 0; i < state.hives.length; i++) {
-    if (vecDist({ x, y }, state.hives[i]) < 25) {
+    if (vecDist({ x, y }, state.hives[i]) < removeDist) {
       state.hives.splice(i, 1);
       updateHiveCount();
       elGoButton.style.display = 'none';
       elHintText.style.display = 'block';
+      elHintText.textContent = isTouchDevice ? 'tap to place hive' : 'click to place hive';
       return;
     }
   }
@@ -287,7 +432,7 @@ function handlePlacement(x, y) {
   // Show Go button if all hives placed
   if (state.hives.length === state.map.hivesAllowed) {
     elGoButton.style.display = 'block';
-    elHintText.textContent = 'press GO or SPACE';
+    elHintText.textContent = isTouchDevice ? 'tap GO to start' : 'press GO or SPACE';
   }
 }
 
