@@ -45,14 +45,16 @@ class PheromoneGrid {
     };
   }
 
-  // Deposit pheromone at world position
+  // Deposit pheromone at world position (diminishing returns: saturated cells absorb less)
   deposit(wx, wy, type, amount) {
     const idx = this._toIndex(wx, wy);
     if (idx < 0 || !this.passable[idx]) return;
     if (type === 'exploration') {
-      this.exploration[idx] = Math.min(this.exploration[idx] + amount, 1.0);
+      const current = this.exploration[idx];
+      this.exploration[idx] = Math.min(current + amount * (1 - current * 0.7), 1.0);
     } else {
-      this.recruitment[idx] = Math.min(this.recruitment[idx] + amount, 1.0);
+      const current = this.recruitment[idx];
+      this.recruitment[idx] = Math.min(current + amount * (1 - current * 0.7), 1.0);
     }
   }
 

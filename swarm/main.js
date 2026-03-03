@@ -8,8 +8,8 @@ const CANVAS_WIDTH = 1280;
 const CANVAS_HEIGHT = 720;
 const SIM_TICKS_PER_SECOND = 60;
 const FIXED_DT = 1000 / SIM_TICKS_PER_SECOND;
-const DIFFUSION_RATE = 0.2;
-const EVAPORATION_RATE = 0.993;
+const DIFFUSION_RATE = 0.24;
+const EVAPORATION_RATE = 0.991;
 
 // === Game Phases ===
 const GamePhase = {

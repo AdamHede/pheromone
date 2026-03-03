@@ -16,12 +16,13 @@ const MAX_TURN_RATE = degToRad(15);     // THE beauty parameter
 const SENSOR_ANGLE = degToRad(42);
 const SENSOR_DISTANCE = 14;
 const STEER_STRENGTH = degToRad(4);
-const RANDOM_STEER = degToRad(16);
+const RANDOM_STEER = degToRad(20);
 const HARVEST_DURATION = 30;            // frames (~0.5s at 60fps)
 const DELIVER_DURATION = 18;            // frames (~0.3s)
-const EXPLORATION_DEPOSIT = 0.08;
-const RECRUITMENT_DEPOSIT = 0.18;
-const RECRUITMENT_STEER_WEIGHT = 1.4;   // Recruitment attraction vs exploration repulsion
+const EXPLORATION_DEPOSIT = 0.05;
+const RECRUITMENT_DEPOSIT = 0.12;
+const RECRUITMENT_STEER_WEIGHT = 1.0;   // Recruitment attraction vs exploration repulsion
+const PERCEPTION_NOISE = 0.06;          // Noise added to sensor readings — weak trails feel unreliable
 const HIVE_HOMING_BIAS = 0.15;          // Blend toward hive in returning state
 const FLOWER_DETECT_RADIUS = 15;
 const HIVE_DETECT_RADIUS = 20;
@@ -116,17 +117,21 @@ class Bee {
 
     let turn = 0;
 
-    // 1. Steer toward recruitment pheromone (attraction)
+    // 1. Steer toward recruitment pheromone (attraction) with perception noise
     const recSensors = pheromoneGrid.sampleDirection(
       this.x, this.y, this.heading, SENSOR_ANGLE, SENSOR_DISTANCE, 'recruitment'
     );
+    // Add noise so weak trails are unreliable, strong trails dominate
+    const nL = recSensors.left + this.rng.next() * PERCEPTION_NOISE;
+    const nC = recSensors.center + this.rng.next() * PERCEPTION_NOISE;
+    const nR = recSensors.right + this.rng.next() * PERCEPTION_NOISE;
     const recMax = Math.max(recSensors.left, recSensors.center, recSensors.right);
     if (recMax > 0.01) {
-      if (recSensors.center >= recSensors.left && recSensors.center >= recSensors.right) {
+      if (nC >= nL && nC >= nR) {
         // Go straight
-      } else if (recSensors.left > recSensors.right) {
+      } else if (nL > nR) {
         turn -= STEER_STRENGTH * RECRUITMENT_STEER_WEIGHT;
-      } else if (recSensors.right > recSensors.left) {
+      } else if (nR > nL) {
         turn += STEER_STRENGTH * RECRUITMENT_STEER_WEIGHT;
       } else {
         turn += this.rng.chance(0.5) ? STEER_STRENGTH : -STEER_STRENGTH;
@@ -182,8 +187,8 @@ class Bee {
     const homingDiff = normalizeAngle(toHive - this.heading);
     turn += homingDiff * HIVE_HOMING_BIAS;
 
-    // 3. Reduced random steering
-    turn += this.rng.range(-RANDOM_STEER * 0.3, RANDOM_STEER * 0.3);
+    // 3. Moderate random steering (creates parallel lanes in return paths)
+    turn += this.rng.range(-RANDOM_STEER * 0.5, RANDOM_STEER * 0.5);
 
     // 4. Check if reached hive
     const dx = this.hive.x - this.x;
@@ -211,7 +216,7 @@ class Bee {
       this.state = BeeState.RETURNING;
       // Turn around to head home
       this.heading = Math.atan2(this.hive.y - this.y, this.hive.x - this.x);
-      this.heading += this.rng.range(-0.3, 0.3); // slight randomness
+      this.heading += this.rng.range(-0.5, 0.5); // spread return paths
       this.targetFlower = null;
     }
   }
