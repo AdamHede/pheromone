@@ -45,6 +45,11 @@ let audio = null;
 let canvas = null;
 let lastTime = 0;
 let accumulator = 0;
+let currentDpr = 1;
+
+function getDevicePixelRatio() {
+  return Math.min(window.devicePixelRatio || 1, 3);
+}
 
 // === DOM elements ===
 let elMapTitle, elMapDesc, elHiveCount, elTimerDisplay, elFoodCounter;
@@ -72,6 +77,17 @@ function resizeCanvas() {
     cssHeight = windowW / gameAspect;
   }
 
+  // Update backing store if DPR changed (e.g. window moved between displays)
+  const newDpr = getDevicePixelRatio();
+  if (newDpr !== currentDpr) {
+    currentDpr = newDpr;
+    canvas.width = CANVAS_WIDTH * currentDpr;
+    canvas.height = CANVAS_HEIGHT * currentDpr;
+    if (renderer) {
+      renderer.setDpr(currentDpr);
+    }
+  }
+
   canvas.style.width = cssWidth + 'px';
   canvas.style.height = cssHeight + 'px';
   canvas.style.position = 'absolute';
@@ -92,9 +108,11 @@ function resizeCanvas() {
 function init() {
   canvas = document.getElementById('game-canvas');
 
-  // Size canvas: internal resolution is always 1280x720
-  canvas.width = CANVAS_WIDTH;
-  canvas.height = CANVAS_HEIGHT;
+  // DPR-aware canvas sizing: logical resolution stays 1280x720,
+  // backing store scales up for crisp rendering on HiDPI displays
+  currentDpr = getDevicePixelRatio();
+  canvas.width = CANVAS_WIDTH * currentDpr;
+  canvas.height = CANVAS_HEIGHT * currentDpr;
 
   // Fit canvas with correct aspect ratio (letterboxing)
   resizeCanvas();
@@ -118,7 +136,7 @@ function init() {
   elMapSelect = document.getElementById('map-select');
 
   // Create systems
-  renderer = new Renderer(canvas);
+  renderer = new Renderer(canvas, currentDpr);
   audio = new AudioManager();
 
   // Setup input

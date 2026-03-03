@@ -4,11 +4,12 @@
 // ============================================================
 
 class Renderer {
-  constructor(canvas) {
+  constructor(canvas, dpr) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
-    this.width = canvas.width;
-    this.height = canvas.height;
+    this.dpr = dpr || 1;
+    this.width = canvas.width / this.dpr;   // logical width (1280)
+    this.height = canvas.height / this.dpr;  // logical height (720)
 
     // Pheromone offscreen canvas (at GRID resolution, scaled up when drawn)
     this.pheromoneCanvas = null;
@@ -17,13 +18,13 @@ class Renderer {
     this.pheromoneRenderCounter = 0;
     this.PHEROMONE_RENDER_INTERVAL = 2;
 
-    // Pre-rendered glow sprites
+    // Pre-rendered glow sprites (at DPR resolution for crisp gradients)
     this.beeGlowSearching = this._createGlowSprite(12, [255, 235, 180], 0.7);
     this.beeGlowReturning = this._createGlowSprite(16, [255, 200, 80], 0.9);
     this.beeGlowFollowing = this._createGlowSprite(14, [255, 215, 120], 0.8);
     this.hiveGlowSprite = this._createGlowSprite(70, [255, 190, 80], 0.6);
 
-    // Background grain
+    // Background grain (intentionally low-res, stays at logical/4)
     this.perlin = new PerlinNoise(42);
     this.grainCanvas = document.createElement('canvas');
     this.grainCanvas.width = Math.ceil(this.width / 4);
@@ -43,6 +44,22 @@ class Renderer {
     this._recruitmentRGB = hslToRgb(35 / 360, 0.9, 0.55);   // Amber
   }
 
+  setDpr(dpr) {
+    this.dpr = dpr;
+    this.width = this.canvas.width / dpr;
+    this.height = this.canvas.height / dpr;
+
+    // Regenerate glow sprites at new DPR resolution
+    this.beeGlowSearching = this._createGlowSprite(12, [255, 235, 180], 0.7);
+    this.beeGlowReturning = this._createGlowSprite(16, [255, 200, 80], 0.9);
+    this.beeGlowFollowing = this._createGlowSprite(14, [255, 215, 120], 0.8);
+    this.hiveGlowSprite = this._createGlowSprite(70, [255, 190, 80], 0.6);
+
+    // Resize grain canvas
+    this.grainCanvas.width = Math.ceil(this.width / 4);
+    this.grainCanvas.height = Math.ceil(this.height / 4);
+  }
+
   initPheromoneCanvas(grid) {
     this.pheromoneCanvas = document.createElement('canvas');
     this.pheromoneCanvas.width = grid.cols;
@@ -52,13 +69,16 @@ class Renderer {
   }
 
   _createGlowSprite(radius, rgb, intensity) {
-    const size = radius * 2;
+    const dpr = this.dpr;
+    const size = radius * 2 * dpr;
     const c = document.createElement('canvas');
     c.width = size;
     c.height = size;
     const ctx = c.getContext('2d');
 
-    const gradient = ctx.createRadialGradient(radius, radius, 0, radius, radius, radius);
+    const center = radius * dpr;
+    const r = radius * dpr;
+    const gradient = ctx.createRadialGradient(center, center, 0, center, center, r);
     gradient.addColorStop(0, `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${intensity})`);
     gradient.addColorStop(0.2, `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${intensity * 0.6})`);
     gradient.addColorStop(0.5, `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${intensity * 0.15})`);
@@ -71,6 +91,10 @@ class Renderer {
 
   render(state, timestamp) {
     const ctx = this.ctx;
+
+    // Apply DPR scaling so all draw calls use logical coordinates
+    ctx.save();
+    ctx.scale(this.dpr, this.dpr);
 
     // 1. Background
     this._drawBackground(ctx);
@@ -111,6 +135,8 @@ class Renderer {
     if (this.showCursor && state.phase === 'placement') {
       this._drawCursorPreview(ctx);
     }
+
+    ctx.restore();
   }
 
   _drawBackground(ctx) {
