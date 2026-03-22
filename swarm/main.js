@@ -544,6 +544,7 @@ function simulationTick() {
     // Detect delivery
     if (bee.hive.justDelivered) {
       bee.hive.justDelivered = false;
+      bee.hive.pulseT = 1.0;
       state.particles.spawnDeliverySparkle(bee.hive.x, bee.hive.y);
       audio.playDeliveryTick();
     }
@@ -569,6 +570,14 @@ function simulationTick() {
 
   // Update particles
   state.particles.update();
+
+  // Update hives visuals
+  for (const hive of state.hives) {
+    if (hive.pulseT > 0) {
+      hive.pulseT *= 0.9;
+      if (hive.pulseT < 0.01) hive.pulseT = 0;
+    }
+  }
 
   // Update total food count
   state.totalFood = state.hives.reduce((sum, h) => sum + h.foodCollected, 0);

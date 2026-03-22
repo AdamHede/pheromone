@@ -12,6 +12,7 @@ class Renderer {
     this.height = canvas.height / this.dpr;  // logical height (720)
 
     // Pheromone offscreen canvas (at GRID resolution, scaled up when drawn)
+
     this.pheromoneCanvas = null;
     this.pheromoneCtx = null;
     this.pheromoneImageData = null;
@@ -264,6 +265,8 @@ class Renderer {
   _drawFlowers(ctx, flowers, timestamp) {
     if (!flowers) return;
     for (const flower of flowers) {
+      if (flower.resource <= 0) continue; // Skip drawing fully depleted flowers
+
       const brightness = flower.resource / flower.maxResource;
       const baseAlpha = 0.15 + brightness * 0.85;
       const radius = (6 + brightness * 6);
@@ -271,8 +274,8 @@ class Renderer {
       // Harvest pulse effect
       let pulseScale = 1;
       if (flower.harvestPulse > 0) {
-        pulseScale = 1 + flower.harvestPulse * 0.15;
-        flower.harvestPulse *= 0.9;
+        pulseScale = 1 + flower.harvestPulse * 0.3;
+        flower.harvestPulse *= 0.85;
         if (flower.harvestPulse < 0.01) flower.harvestPulse = 0;
       }
 
@@ -285,6 +288,7 @@ class Renderer {
       const hsl = rgb; // [h, s, l]
       const glowColor = hslToString(hsl[0], hsl[1], hsl[2], baseAlpha * 0.3);
       const coreColor = hslToString(hsl[0], hsl[1], Math.min(hsl[2] + 15, 90), baseAlpha);
+      const petalColor = hslToString(hsl[0], hsl[1], Math.min(hsl[2] + 5, 80), baseAlpha * 0.8);
 
       // Outer glow
       ctx.beginPath();
@@ -292,9 +296,22 @@ class Renderer {
       ctx.fillStyle = glowColor;
       ctx.fill();
 
+      // Petals
+      const petalCount = 6;
+      const petalLength = finalRadius * 1.4;
+      ctx.fillStyle = petalColor;
+      for (let i = 0; i < petalCount; i++) {
+        const angle = timestamp * 0.0005 + (i * Math.PI * 2) / petalCount;
+        const px = flower.x + Math.cos(angle) * petalLength * 0.5;
+        const py = flower.y + Math.sin(angle) * petalLength * 0.5;
+        ctx.beginPath();
+        ctx.arc(px, py, finalRadius * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
       // Core
       ctx.beginPath();
-      ctx.arc(flower.x, flower.y, finalRadius, 0, Math.PI * 2);
+      ctx.arc(flower.x, flower.y, finalRadius * 0.7, 0, Math.PI * 2);
       ctx.fillStyle = coreColor;
       ctx.fill();
     }
@@ -304,9 +321,10 @@ class Renderer {
     for (const hive of hives) {
       const pulse = Math.sin(timestamp * 0.003) * 0.15 + 1; // ~0.5Hz
       const flashBoost = hive.flashTimer > 0 ? (hive.flashTimer / 8) * 0.5 : 0;
+      const deliveryBoost = hive.pulseT || 0;
 
       // Large glow sprite
-      const glowSize = 70 * pulse;
+      const glowSize = 70 * pulse + (deliveryBoost * 20);
       ctx.globalAlpha = 0.4 + flashBoost;
       ctx.drawImage(
         this.hiveGlowSprite,
@@ -317,19 +335,50 @@ class Renderer {
       );
       ctx.globalAlpha = 1;
 
-      // Core circle
-      const radius = 12 * pulse;
-      const lightness = 55 + flashBoost * 30;
-      ctx.fillStyle = hslToString(35, 80, lightness, 0.9);
-      ctx.beginPath();
-      ctx.arc(hive.x, hive.y, radius, 0, Math.PI * 2);
-      ctx.fill();
+      // Hexagon instead of circle
+      const radius = 14 * pulse + (deliveryBoost * 3);
+      const lightness = 55 + flashBoost * 30 + deliveryBoost * 20;
 
-      // Inner bright center
-      ctx.fillStyle = hslToString(40, 70, 80 + flashBoost * 15, 0.6);
-      ctx.beginPath();
-      ctx.arc(hive.x, hive.y, radius * 0.4, 0, Math.PI * 2);
-      ctx.fill();
+      // Helper function to draw hexagon
+      const drawHex = (x, y, r, color) => {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const angle = (i * Math.PI) / 3 + (timestamp * 0.0005);
+          const hx = x + Math.cos(angle) * r;
+          const hy = y + Math.sin(angle) * r;
+          if (i === 0) ctx.moveTo(hx, hy);
+          else ctx.lineTo(hx, hy);
+        }
+        ctx.closePath();
+        ctx.fill();
+      };
+
+      // Draw outer hexagon
+      drawHex(hive.x, hive.y, radius, hslToString(35, 80, lightness, 0.9));
+
+      // Draw inner hexagon
+      drawHex(hive.x, hive.y, radius * 0.5, hslToString(40, 70, 80 + flashBoost * 15, 0.6));
+
+      // Sub-hexagons for honeycomb effect
+      ctx.fillStyle = hslToString(35, 90, lightness + 10, 0.5);
+      for (let i = 0; i < 6; i++) {
+        const angle = (i * Math.PI) / 3 + (timestamp * 0.0005);
+        const subR = radius * 0.6;
+        const subX = hive.x + Math.cos(angle) * subR;
+        const subY = hive.y + Math.sin(angle) * subR;
+        ctx.beginPath();
+        for (let j = 0; j < 6; j++) {
+            const angle2 = (j * Math.PI) / 3 + (timestamp * 0.0005);
+            const hexR = radius * 0.25;
+            const hx = subX + Math.cos(angle2) * hexR;
+            const hy = subY + Math.sin(angle2) * hexR;
+            if (j === 0) ctx.moveTo(hx, hy);
+            else ctx.lineTo(hx, hy);
+        }
+        ctx.closePath();
+        ctx.fill();
+      }
 
       if (hive.flashTimer > 0) hive.flashTimer--;
     }
