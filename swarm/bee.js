@@ -104,10 +104,16 @@ class Bee {
     let nx = this.x + Math.cos(this.heading) * effectiveSpeed;
     let ny = this.y + Math.sin(this.heading) * effectiveSpeed;
 
-    // Apply wind force
+    // Apply wind force (scaled by local shelter exposure and gust)
+    let windFx = 0, windFy = 0;
     if (wind && wind.strength > 0) {
-      nx += Math.cos(wind.angle) * wind.strength;
-      ny += Math.sin(wind.angle) * wind.strength;
+      const exposure = pheromoneGrid.getWindExposure(this.x, this.y);
+      const gustMult = wind.gustFactor || 1;
+      const localWind = wind.strength * exposure * gustMult;
+      windFx = Math.cos(wind.angle) * localWind;
+      windFy = Math.sin(wind.angle) * localWind;
+      nx += windFx;
+      ny += windFy;
     }
 
     // Bounce off map edges
@@ -120,10 +126,8 @@ class Bee {
     }
 
     // Recompute with potentially bounced heading
-    const nextX = this.x + Math.cos(this.heading) * effectiveSpeed
-      + (wind && wind.strength > 0 ? Math.cos(wind.angle) * wind.strength : 0);
-    const nextY = this.y + Math.sin(this.heading) * effectiveSpeed
-      + (wind && wind.strength > 0 ? Math.sin(wind.angle) * wind.strength : 0);
+    const nextX = this.x + Math.cos(this.heading) * effectiveSpeed + windFx;
+    const nextY = this.y + Math.sin(this.heading) * effectiveSpeed + windFy;
 
     if (!pheromoneGrid.isPassable(nextX, nextY)) {
       // Bounce: reflect and add random perturbation

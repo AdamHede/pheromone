@@ -197,6 +197,15 @@ function loadCurrentMap() {
   // Spawn enemy instances from map definitions
   state.enemies = state.map.enemyDefs.map(def => new Wasp(def, CANVAS_WIDTH, CANVAS_HEIGHT));
 
+  // Compute wind shadow (shelter behind obstacles)
+  if (state.map.wind) {
+    state.pheromoneGrid.computeWindShadow(state.map.wind.angle);
+  }
+
+  // Create gust Perlin noise instance
+  state.gustPerlin = new PerlinNoise(state.seed);
+  state.gustFactor = 1.0;
+
   state._flowerResourcesBefore = new Float64Array(state.map.flowers.length);
 
   renderer.initPheromoneCanvas(state.pheromoneGrid);
@@ -497,14 +506,29 @@ function simulationTick() {
     }
   }
 
-  state.pheromoneGrid.update(DIFFUSION_RATE, EVAPORATION_RATE);
+  // Compute gust factor for this tick
+  const wind = state.map.wind;
+  if (wind && wind.strength > 0) {
+    const gustSpeed = wind.gustSpeed || 0.003;
+    const gustRange = wind.gustRange || 0.5;
+    const gustNoise = state.gustPerlin.noise2D(state.simTime * gustSpeed, 0);
+    // gustNoise is -1..1, map to (1-gustRange)..1
+    state.gustFactor = 1 - gustRange * 0.5 + gustNoise * gustRange * 0.5;
+    state.gustFactor = clamp(state.gustFactor, 0, 1);
+    // Attach to wind object for bees to read
+    wind.gustFactor = state.gustFactor;
+  } else {
+    state.gustFactor = 1.0;
+  }
+
+  // Update pheromone grid with wind drift
+  state.pheromoneGrid.update(DIFFUSION_RATE, EVAPORATION_RATE, wind, state.gustFactor);
 
   const frb = state._flowerResourcesBefore;
   for (let i = 0; i < state.map.flowers.length; i++) {
     frb[i] = state.map.flowers[i].resource;
   }
 
-  const wind = state.map.wind;
   const bounds = { width: CANVAS_WIDTH, height: CANVAS_HEIGHT };
 
   // Update bees
@@ -658,6 +682,11 @@ function watchAgain() {
     }
   }
 
+  // Recompute wind shadow
+  if (state.map.wind) {
+    state.pheromoneGrid.computeWindShadow(state.map.wind.angle);
+  }
+
   for (const f of state.map.flowers) {
     f.resource = f.maxResource;
     f.harvestPulse = 0;
@@ -758,7 +787,9 @@ function gameLoop(timestamp) {
       activeBees,
       swarmCenter.x,
       CANVAS_WIDTH,
-      state.map.beeCount
+      state.map.beeCount,
+      state.map.wind ? state.map.wind.strength : 0,
+      state.gustFactor
     );
   }
 

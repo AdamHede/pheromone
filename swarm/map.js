@@ -105,7 +105,7 @@ const MAPS = [
       { x: 0.22, y: 0.42, resource: 28, color: 'blue' },
     ],
     obstacles: [],
-    wind: { angle: 0, strength: 0.5 }, // Blows right (east)
+    wind: { angle: 0, strength: 1.2, gustSpeed: 0.003, gustRange: 0.5 }, // Strong eastward wind with gusts
   },
 
   // === MAP 5: The Wall — obstacles + wind ===
@@ -129,7 +129,7 @@ const MAPS = [
       { type: 'rect', x: 0.54, y: 0.0, w: 0.02, h: 0.36 },
       { type: 'rect', x: 0.54, y: 0.48, w: 0.02, h: 0.52 },
     ],
-    wind: { angle: Math.PI * 0.5, strength: 0.3 }, // Blows south (down)
+    wind: { angle: Math.PI * 0.5, strength: 0.8, gustSpeed: 0.004, gustRange: 0.4 }, // Moderate crosswind with gusts
   },
 
   // === MAP 6: Patrol — introduces ENEMIES ===
@@ -210,7 +210,7 @@ const MAPS = [
       // Mud slow zone in lower area
       { type: 'slow', shape: 'rect', x: 0.35, y: 0.70, w: 0.30, h: 0.12, visual: 'mud', speedMult: 0.4 },
     ],
-    wind: { angle: Math.PI * 0.75, strength: 0.4 }, // Blows south-west
+    wind: { angle: Math.PI * 0.75, strength: 1.0, gustSpeed: 0.005, gustRange: 0.6 }, // Strong south-west storm with heavy gusts
     enemies: [
       { type: 'wasp', patrol: [{ x: 0.30, y: 0.25 }, { x: 0.70, y: 0.25 }], speed: 1.3, killRadius: 25 },
       { type: 'wasp', patrol: [{ x: 0.60, y: 0.55 }, { x: 0.60, y: 0.85 }], speed: 1.1, killRadius: 25 },

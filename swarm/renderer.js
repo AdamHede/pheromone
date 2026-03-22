@@ -165,6 +165,11 @@ class Renderer {
       this._drawZones(ctx, state.map.zones, timestamp);
     }
 
+    // 2b. Wind exposure overlay (placement phase only, shows shelter)
+    if (state.map && state.map.wind && state.pheromoneGrid && state.phase === 'placement') {
+      this._drawWindExposure(ctx, state.pheromoneGrid);
+    }
+
     // 3. Obstacles
     if (state.map) {
       this._drawObstacles(ctx, state.map.obstacles);
@@ -172,7 +177,7 @@ class Renderer {
 
     // 3b. Wind indicator (during placement)
     if (state.map && state.map.wind && state.phase === 'placement') {
-      this._drawWindIndicator(ctx, state.map.wind, timestamp);
+      this._drawWindIndicator(ctx, state.map.wind, timestamp, state.gustFactor);
     }
 
     // 3c. Enemy patrol paths (during placement)
@@ -188,9 +193,9 @@ class Renderer {
       this._drawPheromoneField(ctx, state.pheromoneGrid);
     }
 
-    // 5b. Wind particles during sim
+    // 5b. Wind particles during sim (gust-responsive)
     if (state.map && state.map.wind && state.phase !== 'placement' && state.phase !== 'results') {
-      this._drawWindParticles(ctx, state.map.wind, timestamp);
+      this._drawWindParticles(ctx, state.map.wind, timestamp, state.gustFactor);
     }
 
     // 6. Flowers
@@ -304,14 +309,40 @@ class Renderer {
     }
   }
 
+  // === WIND EXPOSURE OVERLAY (placement phase) ===
+  _drawWindExposure(ctx, grid) {
+    ctx.save();
+    ctx.globalAlpha = 0.08;
+
+    const cellW = this.width / grid.cols;
+    const cellH = this.height / grid.rows;
+
+    // Draw sheltered areas as blue tint (lower exposure = more visible)
+    for (let r = 0; r < grid.rows; r += 2) { // Skip every other row for performance
+      for (let c = 0; c < grid.cols; c += 2) {
+        const idx = r * grid.cols + c;
+        const exposure = grid.windExposure[idx];
+        if (exposure >= 0.95) continue; // Fully exposed, skip
+
+        const shelter = 1 - exposure; // 0..1 how sheltered
+        ctx.globalAlpha = shelter * 0.12;
+        ctx.fillStyle = 'rgb(100, 160, 255)';
+        ctx.fillRect(c * cellW, r * cellH, cellW * 2, cellH * 2);
+      }
+    }
+
+    ctx.restore();
+  }
+
   // === WIND INDICATOR (placement phase) ===
-  _drawWindIndicator(ctx, wind, timestamp) {
+  _drawWindIndicator(ctx, wind, timestamp, gustFactor) {
     const cx = this.width / 2;
     const cy = 65;
-    const arrowLen = 30 + wind.strength * 20;
+    const gust = gustFactor || 1;
+    const arrowLen = (30 + wind.strength * 20) * gust;
 
     ctx.save();
-    ctx.globalAlpha = 0.25;
+    ctx.globalAlpha = 0.2 + gust * 0.15;
     ctx.strokeStyle = 'rgba(180, 200, 255, 0.6)';
     ctx.lineWidth = 1.5;
     ctx.fillStyle = 'rgba(180, 200, 255, 0.4)';
@@ -320,19 +351,17 @@ class Renderer {
     for (let i = -1; i <= 1; i++) {
       const ox = cx + i * 25;
       const oy = cy;
-      const drift = Math.sin(timestamp * 0.003 + i) * 3;
+      const drift = Math.sin(timestamp * 0.003 + i) * 3 * gust;
 
       const ex = ox + Math.cos(wind.angle) * (arrowLen + drift);
       const ey = oy + Math.sin(wind.angle) * (arrowLen + drift);
 
-      // Arrow line
       ctx.beginPath();
       ctx.moveTo(ox, oy);
       ctx.lineTo(ex, ey);
       ctx.stroke();
 
-      // Arrowhead
-      const headLen = 6;
+      const headLen = 6 * gust;
       const headAngle = 0.4;
       ctx.beginPath();
       ctx.moveTo(ex, ey);
@@ -348,29 +377,31 @@ class Renderer {
       ctx.fill();
     }
 
-    // Label
+    // Label with strength indicator
     ctx.fillStyle = 'rgba(180, 200, 255, 0.3)';
     ctx.font = '8px "Space Mono", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('WIND', cx, cy - 22);
+    const strengthLabel = wind.strength >= 1.0 ? 'STRONG WIND' : 'WIND';
+    ctx.fillText(strengthLabel, cx, cy - 22);
 
     ctx.restore();
   }
 
-  // === WIND PARTICLES (during sim) ===
-  _drawWindParticles(ctx, wind, timestamp) {
-    ctx.globalAlpha = 0.06;
+  // === WIND PARTICLES (during sim, gust-responsive) ===
+  _drawWindParticles(ctx, wind, timestamp, gustFactor) {
+    const gust = gustFactor || 1;
+    ctx.globalAlpha = 0.03 + gust * 0.06; // More visible during gusts
     ctx.fillStyle = 'rgb(180, 200, 255)';
 
-    // Draw subtle drifting streaks
-    const count = 12;
+    // Draw drifting streaks, count increases with gust
+    const count = Math.floor(8 + gust * 12);
     const t = timestamp * 0.001;
+    const effectiveStrength = wind.strength * gust;
     for (let i = 0; i < count; i++) {
       const seed = i * 137.5;
-      // Position wraps across canvas
-      const baseX = ((seed + t * wind.strength * 80 * Math.cos(wind.angle)) % this.width + this.width) % this.width;
-      const baseY = ((seed * 0.7 + t * wind.strength * 80 * Math.sin(wind.angle)) % this.height + this.height) % this.height;
-      const len = 8 + wind.strength * 15;
+      const baseX = ((seed + t * effectiveStrength * 80 * Math.cos(wind.angle)) % this.width + this.width) % this.width;
+      const baseY = ((seed * 0.7 + t * effectiveStrength * 80 * Math.sin(wind.angle)) % this.height + this.height) % this.height;
+      const len = (8 + effectiveStrength * 15) * gust;
 
       ctx.fillRect(
         baseX,

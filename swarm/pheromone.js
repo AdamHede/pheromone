@@ -1,7 +1,11 @@
 // ============================================================
 // SWARM — pheromone.js
 // Double-buffered pheromone grid: deposit, sample, diffuse, evaporate
+// Wind-biased diffusion (pheromone drift) and wind exposure (shelter)
 // ============================================================
+
+const PHEROMONE_DRIFT_STRENGTH = 0.4; // How much wind biases diffusion
+const WIND_SHADOW_LENGTH = 20;        // Grid cells of shadow behind obstacles
 
 class PheromoneGrid {
   constructor(width, height, cellSize) {
@@ -29,6 +33,22 @@ class PheromoneGrid {
     // Speed multiplier grid: 1.0 = normal, <1.0 = slow zone
     this.speedMult = new Float32Array(this.totalCells);
     this.speedMult.fill(1.0);
+
+    // Wind exposure grid: 1.0 = fully exposed, 0.0 = fully sheltered
+    this.windExposure = new Float32Array(this.totalCells);
+    this.windExposure.fill(1.0);
+
+    // Pre-computed wind drift neighbor weights (8 values, recomputed per frame)
+    // Order: TL, T, TR, L, R, BL, B, BR
+    this._driftWeights = new Float32Array(8);
+    this._driftWeights.fill(1.0);
+
+    // 8-neighbor direction vectors (dc, dr) - matches unrolled order
+    this._neighborDirs = [
+      [-1, -1], [0, -1], [1, -1],  // TL, T, TR
+      [-1,  0],          [1,  0],   // L, R
+      [-1,  1], [0,  1], [1,  1],   // BL, B, BR
+    ];
   }
 
   // Convert world coords to grid index
@@ -134,6 +154,13 @@ class PheromoneGrid {
     return this.speedMult[idx];
   }
 
+  // Get wind exposure at world position
+  getWindExposure(wx, wy) {
+    const idx = this._toIndex(wx, wy);
+    if (idx < 0) return 1.0;
+    return this.windExposure[idx];
+  }
+
   // Mark rectangular slow zone
   markSlowRect(x, y, w, h, mult) {
     const col0 = Math.max(0, Math.floor(x / this.cellSize));
@@ -185,9 +212,91 @@ class PheromoneGrid {
     }
   }
 
-  // Diffusion + evaporation update (merged dual-channel pass)
-  update(diffusionRate, evaporationRate) {
-    this._diffuseBoth(diffusionRate, evaporationRate);
+  // === WIND SHADOW COMPUTATION ===
+  // Cast wind shadows behind all obstacles. Call once after obstacles are stamped.
+  computeWindShadow(windAngle) {
+    this.windExposure.fill(1.0);
+    if (windAngle === undefined || windAngle === null) return;
+
+    const cols = this.cols;
+    const rows = this.rows;
+    const passable = this.passable;
+    const exposure = this.windExposure;
+
+    // Wind direction in grid space (which way wind blows)
+    const wdx = Math.cos(windAngle);
+    const wdy = Math.sin(windAngle);
+
+    const shadowLen = WIND_SHADOW_LENGTH;
+
+    // For each obstacle cell, cast a shadow cone downwind
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (passable[r * cols + c]) continue; // Only cast from obstacles
+
+        // March downwind from this obstacle cell
+        for (let step = 1; step <= shadowLen; step++) {
+          const t = step / shadowLen; // 0..1 how far along shadow
+          const fadeIn = t; // exposure recovers linearly with distance
+
+          // Shadow widens slightly: spread = 0 at obstacle, ~2 cells at max distance
+          const spread = step * 0.1;
+          const spreadSteps = Math.ceil(spread);
+
+          for (let s = -spreadSteps; s <= spreadSteps; s++) {
+            // Perpendicular offset
+            const perpX = -wdy * s;
+            const perpY = wdx * s;
+
+            const sc = Math.round(c + wdx * step + perpX);
+            const sr = Math.round(r + wdy * step + perpY);
+
+            if (sc < 0 || sc >= cols || sr < 0 || sr >= rows) continue;
+            const si = sr * cols + sc;
+            if (!passable[si]) continue; // Don't shadow other obstacles
+
+            // Perpendicular falloff
+            const perpDist = Math.abs(s) / (spread + 0.5);
+            const perpFade = Math.max(0, 1 - perpDist);
+
+            // Combined: low exposure near obstacle, fading to full with distance
+            const shelterAmount = (1 - fadeIn) * perpFade;
+            const newExposure = 1 - shelterAmount;
+            exposure[si] = Math.min(exposure[si], newExposure);
+          }
+        }
+      }
+    }
+  }
+
+  // === DIFFUSION WITH WIND DRIFT ===
+  // Precompute drift weights for the 8 neighbors based on wind direction and gust
+  _computeDriftWeights(windAngle, gustFactor) {
+    const wdx = Math.cos(windAngle);
+    const wdy = Math.sin(windAngle);
+    const dirs = this._neighborDirs;
+    const w = this._driftWeights;
+    const drift = PHEROMONE_DRIFT_STRENGTH * gustFactor;
+
+    for (let i = 0; i < 8; i++) {
+      const dc = dirs[i][0];
+      const dr = dirs[i][1];
+      // Direction from neighbor to center: (-dc, -dr)
+      // Dot with wind direction: how "upwind" is this neighbor?
+      const len = Math.sqrt(dc * dc + dr * dr);
+      const dot = (-dc * wdx + -dr * wdy) / len;
+      // Positive dot = neighbor is upwind = more pheromone flows from it
+      w[i] = Math.max(0.1, 1 + dot * drift);
+    }
+  }
+
+  // Diffusion + evaporation update with optional wind drift
+  update(diffusionRate, evaporationRate, wind, gustFactor) {
+    const hasWind = wind && wind.strength > 0 && gustFactor > 0;
+    if (hasWind) {
+      this._computeDriftWeights(wind.angle, gustFactor);
+    }
+    this._diffuseBoth(diffusionRate, evaporationRate, hasWind);
 
     // Swap buffers
     let tmp = this.exploration;
@@ -199,13 +308,15 @@ class PheromoneGrid {
     this.recruitmentNext = tmp;
   }
 
-  _diffuseBoth(diffusionRate, evaporationRate) {
+  _diffuseBoth(diffusionRate, evaporationRate, hasWind) {
     const cols = this.cols;
     const rows = this.rows;
     const passable = this.passable;
     const expCur = this.exploration, expNxt = this.explorationNext;
     const recCur = this.recruitment, recNxt = this.recruitmentNext;
     const oneMinusDiff = 1 - diffusionRate;
+    const windExp = this.windExposure;
+    const dw = this._driftWeights;
     let totalExp = 0, totalRec = 0;
 
     // Interior cells (no boundary checks needed)
@@ -220,25 +331,42 @@ class PheromoneGrid {
           continue;
         }
 
-        // Unrolled 8-neighbor indices (all guaranteed in-bounds)
+        // Unrolled 8-neighbor indices
         const i_tl = idx - cols - 1, i_t = idx - cols, i_tr = idx - cols + 1;
         const i_l = idx - 1, i_r = idx + 1;
         const i_bl = idx + cols - 1, i_b = idx + cols, i_br = idx + cols + 1;
 
-        let expNS = 0, recNS = 0, nc = 0;
-        if (passable[i_tl]) { expNS += expCur[i_tl]; recNS += recCur[i_tl]; nc++; }
-        if (passable[i_t])  { expNS += expCur[i_t];  recNS += recCur[i_t];  nc++; }
-        if (passable[i_tr]) { expNS += expCur[i_tr]; recNS += recCur[i_tr]; nc++; }
-        if (passable[i_l])  { expNS += expCur[i_l];  recNS += recCur[i_l];  nc++; }
-        if (passable[i_r])  { expNS += expCur[i_r];  recNS += recCur[i_r];  nc++; }
-        if (passable[i_bl]) { expNS += expCur[i_bl]; recNS += recCur[i_bl]; nc++; }
-        if (passable[i_b])  { expNS += expCur[i_b];  recNS += recCur[i_b];  nc++; }
-        if (passable[i_br]) { expNS += expCur[i_br]; recNS += recCur[i_br]; nc++; }
+        let expNS = 0, recNS = 0, totalWeight = 0;
 
-        if (nc > 0) {
-          const invCount = 1 / nc;
-          const eResult = (expCur[idx] * oneMinusDiff + expNS * invCount * diffusionRate) * evaporationRate;
-          const rResult = (recCur[idx] * oneMinusDiff + recNS * invCount * diffusionRate) * evaporationRate;
+        if (hasWind) {
+          // Wind-biased diffusion: weight each neighbor by drift
+          // Blend between uniform (no wind) and biased (full wind) based on local exposure
+          const we = windExp[idx]; // 0 = sheltered (uniform), 1 = exposed (full drift)
+
+          if (passable[i_tl]) { const wt = 1 + (dw[0] - 1) * we; expNS += expCur[i_tl] * wt; recNS += recCur[i_tl] * wt; totalWeight += wt; }
+          if (passable[i_t])  { const wt = 1 + (dw[1] - 1) * we; expNS += expCur[i_t]  * wt; recNS += recCur[i_t]  * wt; totalWeight += wt; }
+          if (passable[i_tr]) { const wt = 1 + (dw[2] - 1) * we; expNS += expCur[i_tr] * wt; recNS += recCur[i_tr] * wt; totalWeight += wt; }
+          if (passable[i_l])  { const wt = 1 + (dw[3] - 1) * we; expNS += expCur[i_l]  * wt; recNS += recCur[i_l]  * wt; totalWeight += wt; }
+          if (passable[i_r])  { const wt = 1 + (dw[4] - 1) * we; expNS += expCur[i_r]  * wt; recNS += recCur[i_r]  * wt; totalWeight += wt; }
+          if (passable[i_bl]) { const wt = 1 + (dw[5] - 1) * we; expNS += expCur[i_bl] * wt; recNS += recCur[i_bl] * wt; totalWeight += wt; }
+          if (passable[i_b])  { const wt = 1 + (dw[6] - 1) * we; expNS += expCur[i_b]  * wt; recNS += recCur[i_b]  * wt; totalWeight += wt; }
+          if (passable[i_br]) { const wt = 1 + (dw[7] - 1) * we; expNS += expCur[i_br] * wt; recNS += recCur[i_br] * wt; totalWeight += wt; }
+        } else {
+          // No wind: uniform diffusion (original fast path)
+          if (passable[i_tl]) { expNS += expCur[i_tl]; recNS += recCur[i_tl]; totalWeight++; }
+          if (passable[i_t])  { expNS += expCur[i_t];  recNS += recCur[i_t];  totalWeight++; }
+          if (passable[i_tr]) { expNS += expCur[i_tr]; recNS += recCur[i_tr]; totalWeight++; }
+          if (passable[i_l])  { expNS += expCur[i_l];  recNS += recCur[i_l];  totalWeight++; }
+          if (passable[i_r])  { expNS += expCur[i_r];  recNS += recCur[i_r];  totalWeight++; }
+          if (passable[i_bl]) { expNS += expCur[i_bl]; recNS += recCur[i_bl]; totalWeight++; }
+          if (passable[i_b])  { expNS += expCur[i_b];  recNS += recCur[i_b];  totalWeight++; }
+          if (passable[i_br]) { expNS += expCur[i_br]; recNS += recCur[i_br]; totalWeight++; }
+        }
+
+        if (totalWeight > 0) {
+          const invWeight = 1 / totalWeight;
+          const eResult = (expCur[idx] * oneMinusDiff + expNS * invWeight * diffusionRate) * evaporationRate;
+          const rResult = (recCur[idx] * oneMinusDiff + recNS * invWeight * diffusionRate) * evaporationRate;
           expNxt[idx] = eResult;
           recNxt[idx] = rResult;
           totalExp += eResult;
@@ -250,10 +378,9 @@ class PheromoneGrid {
       }
     }
 
-    // Border cells (with boundary checks)
+    // Border cells (with boundary checks) — no wind drift for simplicity
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        // Skip interior cells already processed
         if (r > 0 && r < rows - 1 && c > 0 && c < cols - 1) continue;
 
         const idx = r * cols + c;

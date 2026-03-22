@@ -19,6 +19,11 @@ class AudioManager {
     this.swarmPanner = null;
     this.swarmFilter = null;
 
+    // Wind subsystem
+    this.windNoiseSource = null;
+    this.windGain = null;
+    this.windFilter = null;
+
     // State tracking
     this.lastHighwayIntensity = 0;
     this.highwayChordActive = false;
@@ -37,6 +42,7 @@ class AudioManager {
       this._initAmbient();
       this._initSwarmTexture();
       this._initHighwayChord();
+      this._initWindNoise();
       this.initialized = true;
     } catch (e) {
       console.warn('Audio initialization failed:', e);
@@ -134,8 +140,35 @@ class AudioManager {
     }
   }
 
+  _initWindNoise() {
+    // Low rumbling noise for wind — looping noise through lowpass
+    const bufferSize = this.ctx.sampleRate * 2;
+    const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+
+    this.windNoiseSource = this.ctx.createBufferSource();
+    this.windNoiseSource.buffer = noiseBuffer;
+    this.windNoiseSource.loop = true;
+
+    this.windFilter = this.ctx.createBiquadFilter();
+    this.windFilter.type = 'lowpass';
+    this.windFilter.frequency.value = 200; // Low rumble
+    this.windFilter.Q.value = 0.7;
+
+    this.windGain = this.ctx.createGain();
+    this.windGain.gain.value = 0;
+
+    this.windNoiseSource.connect(this.windFilter);
+    this.windFilter.connect(this.windGain);
+    this.windGain.connect(this.masterGain);
+    this.windNoiseSource.start();
+  }
+
   // Called each frame from main loop
-  update(totalPheromone, recruitmentIntensity, activeBeeCount, swarmCenterX, canvasWidth, maxBees) {
+  update(totalPheromone, recruitmentIntensity, activeBeeCount, swarmCenterX, canvasWidth, maxBees, windStrength, gustFactor) {
     if (!this.initialized) return;
 
     const now = this.ctx.currentTime;
@@ -164,6 +197,18 @@ class AudioManager {
     // Highway chord: fade in/out based on recruitment intensity
     const highwayVol = smoothstep(0.1, 0.5, normalizedRecruitment) * 0.12;
     this.highwayGain.gain.linearRampToValueAtTime(highwayVol, now + 0.3);
+
+    // Wind noise: volume and filter cutoff driven by wind strength and gust
+    if (windStrength > 0 && this.windGain) {
+      const gust = gustFactor || 1;
+      const windVol = windStrength * gust * 0.08; // Subtle but present
+      this.windGain.gain.linearRampToValueAtTime(clamp(windVol, 0, 0.15), now + 0.15);
+      // Higher gusts open the filter for more presence
+      const windCutoff = 150 + gust * windStrength * 250; // 150-400 Hz range
+      this.windFilter.frequency.linearRampToValueAtTime(windCutoff, now + 0.15);
+    } else if (this.windGain) {
+      this.windGain.gain.linearRampToValueAtTime(0, now + 0.3);
+    }
   }
 
   // Play when a bee discovers food
@@ -281,6 +326,7 @@ class AudioManager {
     this.ambientGain.gain.setValueAtTime(0, now);
     this.swarmGain.gain.setValueAtTime(0, now);
     this.highwayGain.gain.setValueAtTime(0, now);
+    if (this.windGain) this.windGain.gain.setValueAtTime(0, now);
   }
 
   // Cleanup
