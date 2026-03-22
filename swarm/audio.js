@@ -240,6 +240,31 @@ class AudioManager {
     source.start(now);
   }
 
+  // Play when a bee is killed by a wasp — sharp descending sting
+  playBeeKilled() {
+    if (!this.initialized) return;
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.value = 800;
+    osc.frequency.exponentialRampToValueAtTime(200, now + 0.15);
+
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 1200;
+
+    const gain = this.ctx.createGain();
+    gain.gain.value = 0.04;
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.25);
+  }
+
   // Gradually fade everything out (end of sim)
   fadeOut(duration) {
     if (!this.initialized) return;

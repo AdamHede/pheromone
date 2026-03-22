@@ -1,6 +1,7 @@
 // ============================================================
 // SWARM — renderer.js
 // ALL drawing: pheromone heatmap, bees, hives, flowers, glow, UI
+// zones, wind, enemies, death animations
 // ============================================================
 
 class Renderer {
@@ -11,11 +12,15 @@ class Renderer {
     this.width = canvas.width / this.dpr;   // logical width (1280)
     this.height = canvas.height / this.dpr;  // logical height (720)
 
-    // Pheromone offscreen canvas (at GRID resolution, scaled up when drawn)
+    this.shakeOffsetX = 0;
+    this.shakeOffsetY = 0;
+    this.shakeIntensity = 0;
 
+    // Pheromone offscreen canvas (at GRID resolution, scaled up when drawn)
     this.pheromoneCanvas = null;
     this.pheromoneCtx = null;
     this.pheromoneImageData = null;
+    this.pheromoneBuf32 = null;
     this.pheromoneRenderCounter = 0;
     this.PHEROMONE_RENDER_INTERVAL = 2;
 
@@ -24,6 +29,7 @@ class Renderer {
     this.beeGlowReturning = this._createGlowSprite(12, [255, 200, 80], 0.9);
     this.beeGlowFollowing = this._createGlowSprite(10, [255, 215, 120], 0.8);
     this.hiveGlowSprite = this._createGlowSprite(70, [255, 190, 80], 0.6);
+    this.waspGlowSprite = this._createGlowSprite(20, [255, 50, 50], 0.8);
 
     // Background grain (intentionally low-res, stays at logical/4)
     this.perlin = new PerlinNoise(42);
@@ -31,6 +37,7 @@ class Renderer {
     this.grainCanvas.width = Math.ceil(this.width / 4);
     this.grainCanvas.height = Math.ceil(this.height / 4);
     this.grainCtx = this.grainCanvas.getContext('2d');
+    this.grainImageData = this.grainCtx.createImageData(this.grainCanvas.width, this.grainCanvas.height);
     this.grainTime = 0;
     this.grainCounter = 0;
     this.GRAIN_INTERVAL = 4;
@@ -43,6 +50,9 @@ class Renderer {
     // Pre-computed color lookup for pheromone
     this._explorationRGB = hslToRgb(200 / 360, 0.8, 0.5);  // Blue
     this._recruitmentRGB = hslToRgb(35 / 360, 0.9, 0.55);   // Amber
+
+    // Color LUT for pheromone rendering (built on first initPheromoneCanvas)
+    this._pheromoneLUT = null;
   }
 
   setDpr(dpr) {
@@ -50,15 +60,19 @@ class Renderer {
     this.width = this.canvas.width / dpr;
     this.height = this.canvas.height / dpr;
 
-    // Regenerate glow sprites at new DPR resolution
+    this.shakeOffsetX = 0;
+    this.shakeOffsetY = 0;
+    this.shakeIntensity = 0;
+
     this.beeGlowSearching = this._createGlowSprite(9, [255, 235, 180], 0.7);
     this.beeGlowReturning = this._createGlowSprite(12, [255, 200, 80], 0.9);
     this.beeGlowFollowing = this._createGlowSprite(10, [255, 215, 120], 0.8);
     this.hiveGlowSprite = this._createGlowSprite(70, [255, 190, 80], 0.6);
+    this.waspGlowSprite = this._createGlowSprite(20, [255, 50, 50], 0.8);
 
-    // Resize grain canvas
     this.grainCanvas.width = Math.ceil(this.width / 4);
     this.grainCanvas.height = Math.ceil(this.height / 4);
+    this.grainImageData = this.grainCtx.createImageData(this.grainCanvas.width, this.grainCanvas.height);
   }
 
   initPheromoneCanvas(grid) {
@@ -67,6 +81,34 @@ class Renderer {
     this.pheromoneCanvas.height = grid.rows;
     this.pheromoneCtx = this.pheromoneCanvas.getContext('2d');
     this.pheromoneImageData = this.pheromoneCtx.createImageData(grid.cols, grid.rows);
+    this.pheromoneBuf32 = new Uint32Array(this.pheromoneImageData.data.buffer);
+
+    // Build color LUT: 64 exploration levels x 64 recruitment levels
+    this._pheromoneLUT = new Uint32Array(64 * 64);
+    const eR = this._explorationRGB[0], eG = this._explorationRGB[1], eB = this._explorationRGB[2];
+    const rR = this._recruitmentRGB[0], rG = this._recruitmentRGB[1], rB = this._recruitmentRGB[2];
+
+    for (let ei = 0; ei < 64; ei++) {
+      for (let ri = 0; ri < 64; ri++) {
+        const exp = ei / 63;
+        const rec = ri / 63;
+        const total = exp + rec;
+        if (total < 0.003) {
+          this._pheromoneLUT[ei * 64 + ri] = 0;
+          continue;
+        }
+        const recRatio = rec / (total + 0.001);
+        const r = lerp(eR, rR, recRatio);
+        const g = lerp(eG, rG, recRatio);
+        const b = lerp(eB, rB, recRatio);
+        const brightness = clamp(total * 2.5, 0, 1);
+        const R = (r * brightness * 255) | 0;
+        const G = (g * brightness * 255) | 0;
+        const B = (b * brightness * 255) | 0;
+        const A = (brightness * 255) | 0;
+        this._pheromoneLUT[ei * 64 + ri] = (A << 24) | (B << 16) | (G << 8) | R;
+      }
+    }
   }
 
   _createGlowSprite(radius, rgb, intensity) {
@@ -90,62 +132,106 @@ class Renderer {
     return c;
   }
 
+  triggerShake(intensity) {
+    this.shakeIntensity = Math.max(this.shakeIntensity, intensity);
+  }
+
   render(state, timestamp) {
     const ctx = this.ctx;
 
-    // Apply DPR scaling so all draw calls use logical coordinates
+    // Apply screen shake
+    if (this.shakeIntensity > 0) {
+      this.shakeOffsetX = (Math.random() * 2 - 1) * this.shakeIntensity;
+      this.shakeOffsetY = (Math.random() * 2 - 1) * this.shakeIntensity;
+      this.shakeIntensity *= 0.9;
+      if (this.shakeIntensity < 0.5) {
+        this.shakeIntensity = 0;
+        this.shakeOffsetX = 0;
+        this.shakeOffsetY = 0;
+      }
+    }
+
     ctx.save();
     ctx.scale(this.dpr, this.dpr);
+    if (this.shakeIntensity > 0) {
+      ctx.translate(this.shakeOffsetX, this.shakeOffsetY);
+    }
 
     // 1. Background
     this._drawBackground(ctx);
 
-    // 2. Obstacles (source-over, very faint, below pheromone)
+    // 2. Zones (always visible, below everything)
+    if (state.map && state.map.zones) {
+      this._drawZones(ctx, state.map.zones, timestamp);
+    }
+
+    // 3. Obstacles
     if (state.map) {
       this._drawObstacles(ctx, state.map.obstacles);
     }
 
-    // 3. Switch to additive blending
+    // 3b. Wind indicator (during placement)
+    if (state.map && state.map.wind && state.phase === 'placement') {
+      this._drawWindIndicator(ctx, state.map.wind, timestamp);
+    }
+
+    // 3c. Enemy patrol paths (during placement)
+    if (state.enemies && state.enemies.length > 0 && state.phase === 'placement') {
+      this._drawPatrolPaths(ctx, state.enemies);
+    }
+
+    // 4. Switch to additive blending
     ctx.globalCompositeOperation = 'lighter';
 
-    // 4. Pheromone field
+    // 5. Pheromone field
     if (state.pheromoneGrid) {
       this._drawPheromoneField(ctx, state.pheromoneGrid);
     }
 
-    // 5. Flowers
+    // 5b. Wind particles during sim
+    if (state.map && state.map.wind && state.phase !== 'placement' && state.phase !== 'results') {
+      this._drawWindParticles(ctx, state.map.wind, timestamp);
+    }
+
+    // 6. Flowers
     if (state.map) {
       this._drawFlowers(ctx, state.map.flowers, timestamp);
     }
 
-    // 6. Hives
+    // 7. Hives
     this._drawHives(ctx, state.hives, timestamp);
 
-    // 7. Bees
+    // 8. Bees
     this._drawBees(ctx, state.bees);
 
-    // 8. Reset composite mode
+    // 8b. Enemies (wasps)
+    if (state.enemies && state.enemies.length > 0) {
+      this._drawEnemies(ctx, state.enemies, timestamp);
+    }
+
+    // 9. Reset composite mode
     ctx.globalCompositeOperation = 'source-over';
 
-    // 9. Particles
+    // 10. Particles
     if (state.particles) {
       this._drawParticles(ctx, state.particles.getParticles());
     }
 
-    // 10. Cursor preview during placement
+    // 10b. Death animations
+    this._drawDeathAnimations(ctx, state.bees);
+
+    // 11. Cursor preview during placement
     if (this.showCursor && state.phase === 'placement') {
-      this._drawCursorPreview(ctx);
+      this._drawCursorPreview(ctx, state);
     }
 
     ctx.restore();
   }
 
   _drawBackground(ctx) {
-    // Solid dark fill
     ctx.fillStyle = 'hsl(220, 12%, 3%)';
     ctx.fillRect(0, 0, this.width, this.height);
 
-    // Animated noise grain (subtle, updated every few frames)
     this.grainCounter++;
     if (this.grainCounter >= this.GRAIN_INTERVAL) {
       this.grainCounter = 0;
@@ -158,24 +244,257 @@ class Renderer {
   }
 
   _updateGrain() {
-    const gCtx = this.grainCtx;
     const w = this.grainCanvas.width;
     const h = this.grainCanvas.height;
-    const imageData = gCtx.createImageData(w, h);
-    const data = imageData.data;
+    const buf32 = new Uint32Array(this.grainImageData.data.buffer);
 
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const n = this.perlin.noise2D(x * 0.3 + this.grainTime, y * 0.3) * 0.5 + 0.5;
-        const v = Math.floor(n * 80);
-        const idx = (y * w + x) * 4;
-        data[idx] = v;
-        data[idx + 1] = v;
-        data[idx + 2] = v;
-        data[idx + 3] = 255;
+        const v = (n * 80) | 0;
+        buf32[y * w + x] = 0xFF000000 | (v << 16) | (v << 8) | v;
       }
     }
-    gCtx.putImageData(imageData, 0, 0);
+    this.grainCtx.putImageData(this.grainImageData, 0, 0);
+  }
+
+  // === ZONES ===
+  _drawZones(ctx, zones, timestamp) {
+    for (const zone of zones) {
+      const style = zone.visualStyle;
+      const hsl = style.color;
+      const pulse = 0.5 + Math.sin(timestamp * 0.001) * 0.05;
+
+      if (zone.type === 'no-hive') {
+        // Solid translucent fill with subtle animated border
+        ctx.fillStyle = hslToString(hsl[0], hsl[1], hsl[2], 0.12);
+        ctx.strokeStyle = hslToString(hsl[0], hsl[1], hsl[2] + 20, 0.25 * pulse);
+        ctx.lineWidth = 1.5;
+      } else if (zone.type === 'slow') {
+        // Hatched appearance for slow zones
+        ctx.fillStyle = hslToString(hsl[0], hsl[1], hsl[2], 0.08);
+        ctx.strokeStyle = hslToString(hsl[0], hsl[1], hsl[2] + 15, 0.2);
+        ctx.lineWidth = 1;
+      }
+
+      if (zone.shape === 'rect') {
+        ctx.fillRect(zone.x, zone.y, zone.w, zone.h);
+        ctx.strokeRect(zone.x, zone.y, zone.w, zone.h);
+
+        // Label
+        ctx.globalAlpha = 0.15;
+        ctx.fillStyle = hslToString(hsl[0], hsl[1], hsl[2] + 30, 1);
+        ctx.font = '9px "Space Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(style.label, zone.x + zone.w / 2, zone.y + zone.h / 2 + 3);
+        ctx.globalAlpha = 1;
+      } else if (zone.shape === 'circle') {
+        ctx.beginPath();
+        ctx.arc(zone.x, zone.y, zone.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.globalAlpha = 0.15;
+        ctx.fillStyle = hslToString(hsl[0], hsl[1], hsl[2] + 30, 1);
+        ctx.font = '9px "Space Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(style.label, zone.x, zone.y + 3);
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  // === WIND INDICATOR (placement phase) ===
+  _drawWindIndicator(ctx, wind, timestamp) {
+    const cx = this.width / 2;
+    const cy = 65;
+    const arrowLen = 30 + wind.strength * 20;
+
+    ctx.save();
+    ctx.globalAlpha = 0.25;
+    ctx.strokeStyle = 'rgba(180, 200, 255, 0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.fillStyle = 'rgba(180, 200, 255, 0.4)';
+
+    // Draw 3 wind arrows spread vertically
+    for (let i = -1; i <= 1; i++) {
+      const ox = cx + i * 25;
+      const oy = cy;
+      const drift = Math.sin(timestamp * 0.003 + i) * 3;
+
+      const ex = ox + Math.cos(wind.angle) * (arrowLen + drift);
+      const ey = oy + Math.sin(wind.angle) * (arrowLen + drift);
+
+      // Arrow line
+      ctx.beginPath();
+      ctx.moveTo(ox, oy);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+
+      // Arrowhead
+      const headLen = 6;
+      const headAngle = 0.4;
+      ctx.beginPath();
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(
+        ex - Math.cos(wind.angle - headAngle) * headLen,
+        ey - Math.sin(wind.angle - headAngle) * headLen
+      );
+      ctx.lineTo(
+        ex - Math.cos(wind.angle + headAngle) * headLen,
+        ey - Math.sin(wind.angle + headAngle) * headLen
+      );
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Label
+    ctx.fillStyle = 'rgba(180, 200, 255, 0.3)';
+    ctx.font = '8px "Space Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('WIND', cx, cy - 22);
+
+    ctx.restore();
+  }
+
+  // === WIND PARTICLES (during sim) ===
+  _drawWindParticles(ctx, wind, timestamp) {
+    ctx.globalAlpha = 0.06;
+    ctx.fillStyle = 'rgb(180, 200, 255)';
+
+    // Draw subtle drifting streaks
+    const count = 12;
+    const t = timestamp * 0.001;
+    for (let i = 0; i < count; i++) {
+      const seed = i * 137.5;
+      // Position wraps across canvas
+      const baseX = ((seed + t * wind.strength * 80 * Math.cos(wind.angle)) % this.width + this.width) % this.width;
+      const baseY = ((seed * 0.7 + t * wind.strength * 80 * Math.sin(wind.angle)) % this.height + this.height) % this.height;
+      const len = 8 + wind.strength * 15;
+
+      ctx.fillRect(
+        baseX,
+        baseY,
+        Math.cos(wind.angle) * len,
+        Math.sin(wind.angle) * len
+      );
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // === PATROL PATHS (placement phase) ===
+  _drawPatrolPaths(ctx, enemies) {
+    ctx.save();
+    ctx.globalAlpha = 0.2;
+
+    for (const enemy of enemies) {
+      if (enemy.patrol.length < 2) continue;
+
+      // Draw dotted patrol path
+      ctx.strokeStyle = 'rgba(255, 80, 80, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 6]);
+
+      ctx.beginPath();
+      ctx.moveTo(enemy.patrol[0].x, enemy.patrol[0].y);
+      for (let i = 1; i < enemy.patrol.length; i++) {
+        ctx.lineTo(enemy.patrol[i].x, enemy.patrol[i].y);
+      }
+      // Close loop back to start
+      ctx.lineTo(enemy.patrol[0].x, enemy.patrol[0].y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Draw kill radius preview at each waypoint
+      ctx.fillStyle = 'rgba(255, 60, 60, 0.06)';
+      ctx.strokeStyle = 'rgba(255, 60, 60, 0.15)';
+      for (const wp of enemy.patrol) {
+        ctx.beginPath();
+        ctx.arc(wp.x, wp.y, enemy.killRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      // Wasp icon at current position
+      ctx.fillStyle = 'rgba(255, 80, 80, 0.5)';
+      ctx.beginPath();
+      ctx.arc(enemy.x, enemy.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Label
+    ctx.fillStyle = 'rgba(255, 80, 80, 0.3)';
+    ctx.font = '8px "Space Mono", monospace';
+    ctx.textAlign = 'center';
+    for (const enemy of enemies) {
+      ctx.fillText('WASP', enemy.patrol[0].x, enemy.patrol[0].y - 12);
+    }
+
+    ctx.restore();
+  }
+
+  // === ENEMIES (during sim) ===
+  _drawEnemies(ctx, enemies, timestamp) {
+    for (const enemy of enemies) {
+      // Glow
+      const glowSize = 20;
+      ctx.globalAlpha = 0.6 + Math.sin(timestamp * 0.005) * 0.15;
+      ctx.drawImage(
+        this.waspGlowSprite,
+        enemy.x - glowSize,
+        enemy.y - glowSize,
+        glowSize * 2,
+        glowSize * 2
+      );
+
+      // Body - angular, aggressive look
+      ctx.globalAlpha = 0.9;
+      const bodyLen = 5;
+      const bodyWid = 2.5;
+      const h = enemy.heading;
+
+      // Abdomen (back)
+      ctx.fillStyle = 'rgb(200, 50, 30)';
+      ctx.beginPath();
+      ctx.ellipse(
+        enemy.x - Math.cos(h) * 2,
+        enemy.y - Math.sin(h) * 2,
+        bodyLen, bodyWid, h, 0, Math.PI * 2
+      );
+      ctx.fill();
+
+      // Head (front)
+      ctx.fillStyle = 'rgb(255, 80, 40)';
+      ctx.beginPath();
+      ctx.arc(
+        enemy.x + Math.cos(h) * 3,
+        enemy.y + Math.sin(h) * 3,
+        2, 0, Math.PI * 2
+      );
+      ctx.fill();
+
+      // Bright core
+      ctx.fillStyle = 'rgb(255, 120, 60)';
+      ctx.fillRect(enemy.x - 1, enemy.y - 1, 2, 2);
+
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // === DEATH ANIMATIONS ===
+  _drawDeathAnimations(ctx, bees) {
+    for (const bee of bees) {
+      if (!bee.dead || bee.deathTimer <= 0) continue;
+
+      const t = bee.deathTimer / 20; // 1.0 -> 0.0
+      const size = 3 * t;
+      ctx.globalAlpha = t * 0.7;
+      ctx.fillStyle = `rgb(255, ${Math.floor(80 * t)}, ${Math.floor(30 * t)})`;
+      ctx.beginPath();
+      ctx.arc(bee.x, bee.y, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
   }
 
   _drawPheromoneField(ctx, grid) {
@@ -185,60 +504,26 @@ class Renderer {
 
     this.pheromoneRenderCounter++;
     if (this.pheromoneRenderCounter < this.PHEROMONE_RENDER_INTERVAL) {
-      // Still draw the cached version
       ctx.imageSmoothingEnabled = true;
       ctx.drawImage(this.pheromoneCanvas, 0, 0, this.width, this.height);
       return;
     }
     this.pheromoneRenderCounter = 0;
 
-    const cols = grid.cols;
-    const rows = grid.rows;
+    const total = grid.cols * grid.rows;
     const exploration = grid.exploration;
     const recruitment = grid.recruitment;
-    const data = this.pheromoneImageData.data;
+    const buf32 = this.pheromoneBuf32;
+    const lut = this._pheromoneLUT;
 
-    const eR = this._explorationRGB[0];
-    const eG = this._explorationRGB[1];
-    const eB = this._explorationRGB[2];
-    const rR = this._recruitmentRGB[0];
-    const rG = this._recruitmentRGB[1];
-    const rB = this._recruitmentRGB[2];
-
-    for (let i = 0; i < cols * rows; i++) {
-      const exp = exploration[i];
-      const rec = recruitment[i];
-      const pixIdx = i * 4;
-
-      if (exp < 0.003 && rec < 0.003) {
-        data[pixIdx] = 0;
-        data[pixIdx + 1] = 0;
-        data[pixIdx + 2] = 0;
-        data[pixIdx + 3] = 0;
-        continue;
-      }
-
-      // Blend exploration (blue) and recruitment (amber) by ratio
-      const total = exp + rec;
-      const recRatio = rec / (total + 0.001);
-
-      // Interpolate color
-      const r = lerp(eR, rR, recRatio);
-      const g = lerp(eG, rG, recRatio);
-      const b = lerp(eB, rB, recRatio);
-
-      // Brightness proportional to concentration
-      const brightness = clamp(total * 2.5, 0, 1);
-
-      data[pixIdx]     = Math.floor(r * brightness * 255);
-      data[pixIdx + 1] = Math.floor(g * brightness * 255);
-      data[pixIdx + 2] = Math.floor(b * brightness * 255);
-      data[pixIdx + 3] = Math.floor(brightness * 255);
+    for (let i = 0; i < total; i++) {
+      const ei = (clamp(exploration[i], 0, 1) * 63 + 0.5) | 0;
+      const ri = (clamp(recruitment[i], 0, 1) * 63 + 0.5) | 0;
+      buf32[i] = lut[ei * 64 + ri];
     }
 
     this.pheromoneCtx.putImageData(this.pheromoneImageData, 0, 0);
 
-    // Draw scaled up with bilinear filtering for soft glow
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(this.pheromoneCanvas, 0, 0, this.width, this.height);
   }
@@ -265,13 +550,12 @@ class Renderer {
   _drawFlowers(ctx, flowers, timestamp) {
     if (!flowers) return;
     for (const flower of flowers) {
-      if (flower.resource <= 0) continue; // Skip drawing fully depleted flowers
+      if (flower.resource <= 0) continue;
 
       const brightness = flower.resource / flower.maxResource;
       const baseAlpha = 0.15 + brightness * 0.85;
       const radius = (6 + brightness * 6);
 
-      // Harvest pulse effect
       let pulseScale = 1;
       if (flower.harvestPulse > 0) {
         pulseScale = 1 + flower.harvestPulse * 0.3;
@@ -279,24 +563,20 @@ class Renderer {
         if (flower.harvestPulse < 0.01) flower.harvestPulse = 0;
       }
 
-      // Subtle idle pulse
       const idlePulse = 1 + Math.sin(timestamp * 0.002 + flower.x * 0.01) * 0.05;
       const finalRadius = radius * pulseScale * idlePulse;
 
-      // Glow
       const rgb = flower.rgbColor;
-      const hsl = rgb; // [h, s, l]
+      const hsl = rgb;
       const glowColor = hslToString(hsl[0], hsl[1], hsl[2], baseAlpha * 0.3);
       const coreColor = hslToString(hsl[0], hsl[1], Math.min(hsl[2] + 15, 90), baseAlpha);
       const petalColor = hslToString(hsl[0], hsl[1], Math.min(hsl[2] + 5, 80), baseAlpha * 0.8);
 
-      // Outer glow
       ctx.beginPath();
       ctx.arc(flower.x, flower.y, finalRadius * 2, 0, Math.PI * 2);
       ctx.fillStyle = glowColor;
       ctx.fill();
 
-      // Petals
       const petalCount = 6;
       const petalLength = finalRadius * 1.4;
       ctx.fillStyle = petalColor;
@@ -309,7 +589,6 @@ class Renderer {
         ctx.fill();
       }
 
-      // Core
       ctx.beginPath();
       ctx.arc(flower.x, flower.y, finalRadius * 0.7, 0, Math.PI * 2);
       ctx.fillStyle = coreColor;
@@ -319,11 +598,10 @@ class Renderer {
 
   _drawHives(ctx, hives, timestamp) {
     for (const hive of hives) {
-      const pulse = Math.sin(timestamp * 0.003) * 0.15 + 1; // ~0.5Hz
+      const pulse = Math.sin(timestamp * 0.003) * 0.15 + 1;
       const flashBoost = hive.flashTimer > 0 ? (hive.flashTimer / 8) * 0.5 : 0;
       const deliveryBoost = hive.pulseT || 0;
 
-      // Large glow sprite
       const glowSize = 70 * pulse + (deliveryBoost * 20);
       ctx.globalAlpha = 0.4 + flashBoost;
       ctx.drawImage(
@@ -335,11 +613,9 @@ class Renderer {
       );
       ctx.globalAlpha = 1;
 
-      // Hexagon instead of circle
       const radius = 14 * pulse + (deliveryBoost * 3);
       const lightness = 55 + flashBoost * 30 + deliveryBoost * 20;
 
-      // Helper function to draw hexagon
       const drawHex = (x, y, r, color) => {
         ctx.fillStyle = color;
         ctx.beginPath();
@@ -354,13 +630,9 @@ class Renderer {
         ctx.fill();
       };
 
-      // Draw outer hexagon
       drawHex(hive.x, hive.y, radius, hslToString(35, 80, lightness, 0.9));
-
-      // Draw inner hexagon
       drawHex(hive.x, hive.y, radius * 0.5, hslToString(40, 70, 80 + flashBoost * 15, 0.6));
 
-      // Sub-hexagons for honeycomb effect
       ctx.fillStyle = hslToString(35, 90, lightness + 10, 0.5);
       for (let i = 0; i < 6; i++) {
         const angle = (i * Math.PI) / 3 + (timestamp * 0.0005);
@@ -386,25 +658,25 @@ class Renderer {
 
   _drawBees(ctx, bees) {
     for (const bee of bees) {
-      if (!bee.active) continue;
+      if (!bee.active || bee.dead) continue;
       if (bee.state === BeeState.HARVESTING || bee.state === BeeState.DELIVERING) continue;
 
-      // Motion trail
-      for (let i = 0; i < bee.trail.length; i++) {
+      // Motion trail (flat Float32Array: [x0, y0, x1, y1, ...])
+      for (let i = 0; i < TRAIL_LENGTH; i++) {
         const trailAge = (TRAIL_LENGTH - 1 - i);
-        const pos = bee.trail[(bee.trailIndex + i) % TRAIL_LENGTH];
-        if (!pos) continue;
+        const ti = ((bee.trailIndex + i) % TRAIL_LENGTH) * 2;
+        const px = bee.trail[ti];
+        const py = bee.trail[ti + 1];
         const alpha = (1 - trailAge / TRAIL_LENGTH) * 0.15;
         ctx.globalAlpha = alpha;
         ctx.fillStyle = bee.state === BeeState.RETURNING
           ? 'rgb(255, 200, 80)'
           : 'rgb(255, 235, 180)';
-        ctx.fillRect(pos.x - 0.5, pos.y - 0.5, 1.0, 1.0);
+        ctx.fillRect(px - 0.5, py - 0.5, 1.0, 1.0);
       }
 
       ctx.globalAlpha = 1;
 
-      // Glow sprite
       let sprite, spriteSize;
       if (bee.state === BeeState.RETURNING) {
         sprite = this.beeGlowReturning;
@@ -416,7 +688,6 @@ class Renderer {
 
       ctx.drawImage(sprite, bee.x - spriteSize, bee.y - spriteSize, spriteSize * 2, spriteSize * 2);
 
-      // Bright core
       const coreSize = bee.state === BeeState.RETURNING ? 1.8 : 1.4;
       ctx.fillStyle = bee.state === BeeState.RETURNING
         ? 'rgb(255, 220, 100)'
@@ -434,33 +705,51 @@ class Renderer {
     ctx.globalAlpha = 1;
   }
 
-  _drawCursorPreview(ctx) {
+  _drawCursorPreview(ctx, state) {
+    // Check if cursor is in a no-hive zone
+    let blocked = false;
+    if (state && state.map && state.map.zones) {
+      for (const zone of state.map.zones) {
+        if (zone.type === 'no-hive' && isInsideZone(this.cursorX, this.cursorY, zone)) {
+          blocked = true;
+          break;
+        }
+      }
+    }
+
     ctx.globalCompositeOperation = 'lighter';
     const glowSize = 40;
-    ctx.globalAlpha = 0.25;
-    ctx.drawImage(
-      this.hiveGlowSprite,
-      this.cursorX - glowSize,
-      this.cursorY - glowSize,
-      glowSize * 2,
-      glowSize * 2
-    );
-    ctx.globalAlpha = 0.4;
-    ctx.fillStyle = hslToString(35, 80, 55, 0.5);
-    ctx.beginPath();
-    ctx.arc(this.cursorX, this.cursorY, 10, 0, Math.PI * 2);
-    ctx.fill();
+
+    if (blocked) {
+      // Red-tinted preview for blocked placement
+      ctx.globalAlpha = 0.15;
+      ctx.fillStyle = 'rgba(255, 60, 60, 0.3)';
+      ctx.beginPath();
+      ctx.arc(this.cursorX, this.cursorY, 15, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.globalAlpha = 0.25;
+      ctx.drawImage(
+        this.hiveGlowSprite,
+        this.cursorX - glowSize,
+        this.cursorY - glowSize,
+        glowSize * 2,
+        glowSize * 2
+      );
+      ctx.globalAlpha = 0.4;
+      ctx.fillStyle = hslToString(35, 80, 55, 0.5);
+      ctx.beginPath();
+      ctx.arc(this.cursorX, this.cursorY, 10, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
   }
 
-  // Draw UI overlays (called separately so it's always source-over)
   drawUI(state, ctx) {
     if (!ctx) ctx = this.ctx;
     ctx.globalCompositeOperation = 'source-over';
-
-    // These are drawn by DOM elements in index.html instead
-    // This method exists for any canvas-drawn UI needs (score animation, etc.)
   }
 
   setCursor(x, y, show) {

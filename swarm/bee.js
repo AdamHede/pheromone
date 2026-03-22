@@ -19,8 +19,8 @@ const STEER_STRENGTH = degToRad(4);
 const RANDOM_STEER = degToRad(16);
 const HARVEST_DURATION = 30;            // frames (~0.5s at 60fps)
 const DELIVER_DURATION = 18;            // frames (~0.3s)
-const EXPLORATION_DEPOSIT = 0.08;
-const RECRUITMENT_DEPOSIT = 0.18;
+const EXPLORATION_DEPOSIT = 0.18;       // Scaled up for 2px cells (was 0.08 at 4px)
+const RECRUITMENT_DEPOSIT = 0.40;       // Scaled up for 2px cells (was 0.18 at 4px)
 const RECRUITMENT_STEER_WEIGHT = 1.4;   // Recruitment attraction vs exploration repulsion
 const HIVE_HOMING_BIAS = 0.15;          // Blend toward hive in returning state
 const FLOWER_DETECT_RADIUS = 15;
@@ -40,16 +40,28 @@ class Bee {
     this.rng = rng;
     this.spawnDelay = 0;
     this.active = false;
+    this.dead = false;
+    this.deathTimer = 0; // frames of death animation remaining
 
-    // Motion trail ring buffer
-    this.trail = [];
+    // Motion trail ring buffer (flat Float32Array: [x0,y0, x1,y1, ...])
+    this.trail = new Float32Array(TRAIL_LENGTH * 2);
     for (let i = 0; i < TRAIL_LENGTH; i++) {
-      this.trail.push({ x: this.x, y: this.y });
+      this.trail[i * 2] = this.x;
+      this.trail[i * 2 + 1] = this.y;
     }
     this.trailIndex = 0;
   }
 
-  update(pheromoneGrid, flowers, obstacles, bounds) {
+  kill() {
+    this.dead = true;
+    this.active = false;
+    this.deathTimer = 20; // 20 frames of death animation
+  }
+
+  update(pheromoneGrid, flowers, obstacles, bounds, wind) {
+    // Dead bees don't update
+    if (this.dead) return;
+
     // Handle spawn delay
     if (this.spawnDelay > 0) {
       this.spawnDelay--;
@@ -58,7 +70,9 @@ class Bee {
     this.active = true;
 
     // Store position in trail
-    this.trail[this.trailIndex] = { x: this.x, y: this.y };
+    const ti = this.trailIndex * 2;
+    this.trail[ti] = this.x;
+    this.trail[ti + 1] = this.y;
     this.trailIndex = (this.trailIndex + 1) % TRAIL_LENGTH;
 
     let desiredTurn = 0;
@@ -82,9 +96,19 @@ class Bee {
     desiredTurn = clamp(desiredTurn, -MAX_TURN_RATE, MAX_TURN_RATE);
     this.heading += desiredTurn;
 
+    // Get speed multiplier from grid (slow zones)
+    const speedMult = pheromoneGrid.getSpeedMult(this.x, this.y);
+    const effectiveSpeed = this.speed * speedMult;
+
     // Move forward
-    const nx = this.x + Math.cos(this.heading) * this.speed;
-    const ny = this.y + Math.sin(this.heading) * this.speed;
+    let nx = this.x + Math.cos(this.heading) * effectiveSpeed;
+    let ny = this.y + Math.sin(this.heading) * effectiveSpeed;
+
+    // Apply wind force
+    if (wind && wind.strength > 0) {
+      nx += Math.cos(wind.angle) * wind.strength;
+      ny += Math.sin(wind.angle) * wind.strength;
+    }
 
     // Bounce off map edges
     if (nx < 2 || nx > bounds.width - 2) {
@@ -95,9 +119,11 @@ class Bee {
       this.heading += this.rng.range(-0.5, 0.5);
     }
 
-    // Check obstacle collision
-    const nextX = this.x + Math.cos(this.heading) * this.speed;
-    const nextY = this.y + Math.sin(this.heading) * this.speed;
+    // Recompute with potentially bounced heading
+    const nextX = this.x + Math.cos(this.heading) * effectiveSpeed
+      + (wind && wind.strength > 0 ? Math.cos(wind.angle) * wind.strength : 0);
+    const nextY = this.y + Math.sin(this.heading) * effectiveSpeed
+      + (wind && wind.strength > 0 ? Math.sin(wind.angle) * wind.strength : 0);
 
     if (!pheromoneGrid.isPassable(nextX, nextY)) {
       // Bounce: reflect and add random perturbation

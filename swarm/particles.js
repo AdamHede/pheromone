@@ -1,6 +1,6 @@
 // ============================================================
 // SWARM — particles.js
-// Ambient dust, hive pulse, delivery sparkle, pollen burst
+// Ambient dust, hive pulse, delivery sparkle, pollen burst, death burst
 // ============================================================
 
 class ParticleSystem {
@@ -94,6 +94,27 @@ class ParticleSystem {
     }
   }
 
+  // Bee death — red/orange burst
+  spawnDeathBurst(x, y) {
+    const count = 8;
+    for (let i = 0; i < count; i++) {
+      const angle = this.rng.next() * Math.PI * 2;
+      const speed = this.rng.range(1.0, 3.0);
+      this.particles.push({
+        type: 'death',
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: this.rng.range(15, 30),
+        maxLife: 30,
+        alpha: 0.9,
+        size: this.rng.range(1, 2.5),
+        color: [255, this.rng.int(60, 120), 40],
+      });
+    }
+  }
+
   // Bee eruption when "Go" is pressed — radial burst from hive
   spawnBeeEruption(x, y) {
     const count = 15;
@@ -141,7 +162,12 @@ class ParticleSystem {
       p.vy *= 0.97;
 
       if (p.life <= 0) {
-        this.particles.splice(i, 1);
+        // Swap-and-pop: O(1) removal instead of O(n) splice
+        const last = this.particles.length - 1;
+        if (i < last) {
+          this.particles[i] = this.particles[last];
+        }
+        this.particles.pop();
       }
     }
   }
