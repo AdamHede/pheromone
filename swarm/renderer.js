@@ -200,7 +200,9 @@ class Renderer {
 
     // 5b. Wind particles (all maps, all non-results phases — scales with strength)
     if (state.map && state.map.wind && state.phase !== 'results') {
+      ctx.globalCompositeOperation = 'screen';
       this._drawWindParticles(ctx, state.map.wind, timestamp, state.gustFactor);
+      ctx.globalCompositeOperation = 'lighter';
     }
 
     // 6. Flowers
@@ -349,7 +351,7 @@ class Renderer {
     const arrowLen = (20 + str * 25) * gust;
 
     ctx.save();
-    const baseAlpha = isStrong ? 0.35 + gust * 0.2 : 0.15 + gust * 0.1;
+    const baseAlpha = isStrong ? 0.3 + gust * 0.15 : 0.2 + gust * 0.1;
     ctx.globalAlpha = baseAlpha;
 
     // Strong wind: warmer tint, thicker lines
@@ -413,53 +415,59 @@ class Renderer {
     const t = timestamp * 0.001;
     const wdx = Math.cos(wind.angle);
     const wdy = Math.sin(wind.angle);
+    const w = this.width;
+    const h = this.height;
 
     ctx.save();
 
-    // Gradient haze bands that drift with wind direction
+    // Full-screen directional gradient wash
+    const washAlpha = 0.025 + gust * 0.025;
+    const gradX1 = w / 2 - wdx * w * 0.7;
+    const gradY1 = h / 2 - wdy * h * 0.7;
+    const gradX2 = w / 2 + wdx * w * 0.7;
+    const gradY2 = h / 2 + wdy * h * 0.7;
+    const wash = ctx.createLinearGradient(gradX1, gradY1, gradX2, gradY2);
+    wash.addColorStop(0, `rgba(120, 160, 220, ${washAlpha})`);
+    wash.addColorStop(0.5, 'rgba(120, 160, 220, 0)');
+    wash.addColorStop(1, 'rgba(120, 160, 220, 0)');
+    ctx.fillStyle = wash;
+    ctx.fillRect(0, 0, w, h);
+
+    // Drifting haze bands
     const bandCount = Math.floor(3 + str * 3);
+    const perpX = -wdy;
+    const perpY = wdx;
+
     for (let i = 0; i < bandCount; i++) {
       const seed = i * 137.5 + 31;
-      const speed = str * (15 + (seed % 20));
-      const rawOffset = seed * 7.3 + t * speed;
+      const speed = str * (20 + (seed % 25));
+      const drift = ((seed * 7.3 + t * speed) % w + w) % w;
+      const spread = ((i + 0.5) / bandCount - 0.5) * h * 1.5;
 
-      // Position bands perpendicular to wind direction
-      const perpX = -wdy;
-      const perpY = wdx;
-      const bandPos = ((rawOffset % (this.width + this.height)) + this.width) % (this.width + this.height);
+      const cx = w / 2 + perpX * spread + wdx * (drift - w / 2);
+      const cy = h / 2 + perpY * spread + wdy * (drift - h / 2);
 
-      // Band center moves along wind direction
-      const cx = bandPos * wdx + (this.width / 2) * perpX + Math.sin(t * 0.5 + seed) * 30;
-      const cy = bandPos * wdy + (this.height / 2) * perpY + Math.cos(t * 0.7 + seed) * 20;
-
-      // Elongated ellipse along wind direction
-      const bandLen = 200 + str * 150 + (seed % 100);
-      const bandWidth = 40 + (seed % 30);
-      const alpha = (0.015 + gust * 0.02) * Math.min(str / 1.5, 1);
+      const bandLen = 250 + str * 200;
+      const bandWidth = 50 + (seed % 40);
+      const alpha = 0.025 + gust * 0.03;
 
       ctx.globalAlpha = alpha;
-      ctx.fillStyle = 'rgb(160, 190, 240)';
+      ctx.fillStyle = 'rgb(150, 185, 235)';
 
       ctx.beginPath();
       ctx.ellipse(cx, cy, bandLen, bandWidth, wind.angle, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Edge darkening on the windward side (vignette)
-    const vignetteAlpha = 0.04 * Math.min(str / 1.5, 1) * gust;
-    if (vignetteAlpha > 0.005) {
-      const gradX = this.width / 2 - wdx * this.width * 0.6;
-      const gradY = this.height / 2 - wdy * this.height * 0.6;
-      const gradEndX = this.width / 2 + wdx * this.width * 0.4;
-      const gradEndY = this.height / 2 + wdy * this.height * 0.4;
-      const grad = ctx.createLinearGradient(gradX, gradY, gradEndX, gradEndY);
-      grad.addColorStop(0, `rgba(140, 170, 220, ${vignetteAlpha})`);
-      grad.addColorStop(0.4, 'rgba(140, 170, 220, 0)');
-      grad.addColorStop(1, 'rgba(140, 170, 220, 0)');
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, this.width, this.height);
-    }
+    // Windward edge vignette
+    const vigAlpha = 0.05 * gust;
+    const vGrad = ctx.createLinearGradient(gradX1, gradY1, gradX2, gradY2);
+    vGrad.addColorStop(0, `rgba(100, 140, 200, ${vigAlpha})`);
+    vGrad.addColorStop(0.35, 'rgba(100, 140, 200, 0)');
+    vGrad.addColorStop(1, 'rgba(100, 140, 200, 0)');
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = vGrad;
+    ctx.fillRect(0, 0, w, h);
 
     ctx.restore();
   }
@@ -472,45 +480,36 @@ class Renderer {
     const effectiveStrength = str * gust;
     const wdx = Math.cos(wind.angle);
     const wdy = Math.sin(wind.angle);
-    // Perpendicular for slight wave
     const pdx = -wdy;
     const pdy = wdx;
+    const w = this.width;
+    const h = this.height;
 
-    // Strength multiplier for particle counts and alpha (subtle→dramatic)
-    const intensityMult = Math.min(str / 0.3, 1); // ramps from 0→1 over strength 0→0.3
-    const strongMult = str >= 0.8 ? (str - 0.5) / 1.5 : 0; // extra boost for strong wind
-
-    // Layer 1: Flowing streaks
-    const streakCount = Math.floor((5 + gust * 8) * intensityMult + strongMult * 30);
+    // === Layer 1: Flowing streaks ===
+    const streakCount = Math.floor(15 + str * 30 + gust * 10);
     ctx.lineCap = 'round';
 
     for (let i = 0; i < streakCount; i++) {
       const seed = i * 197.3 + 42;
       const seed2 = i * 83.7 + 17;
 
-      // Base position wraps across canvas
-      const speed = effectiveStrength * (60 + (seed % 40));
+      const speed = (0.3 + effectiveStrength) * (60 + (seed % 40));
       const rawX = seed * 3.7 + t * speed * wdx;
       const rawY = seed2 * 2.3 + t * speed * wdy;
-      const baseX = ((rawX % this.width) + this.width) % this.width;
-      const baseY = ((rawY % this.height) + this.height) % this.height;
+      const baseX = ((rawX % w) + w) % w;
+      const baseY = ((rawY % h) + h) % h;
 
-      // Streak length varies with strength and gust
-      const len = (10 + effectiveStrength * 40 + (seed % 20)) * gust;
+      const len = (15 + effectiveStrength * 50 + (seed % 25)) * gust;
 
-      // Slight wave motion perpendicular to wind
       const wavePhase = t * (1.5 + str) + seed * 0.1;
-      const waveAmp = 2 + gust * 3 + str * 3;
+      const waveAmp = 3 + gust * 4 + str * 5;
 
-      // Alpha: subtle on weak wind, visible on strong
-      const baseAlpha = str < 0.5 ? 0.015 : 0.03;
-      const brightness = baseAlpha + (seed % 100) / 100 * (0.03 + strongMult * 0.08) * gust;
+      const brightness = 0.04 + (seed % 100) / 100 * 0.08 * (0.5 + str);
 
       ctx.beginPath();
       ctx.strokeStyle = `rgba(180, 210, 255, ${brightness})`;
-      ctx.lineWidth = 0.3 + str * 0.5 + gust * 0.5;
+      ctx.lineWidth = 0.5 + str * 0.8 + gust * 0.4;
 
-      // 3-point curve: start, wave peak, end
       const sx = baseX;
       const sy = baseY;
       const mx = baseX + wdx * len * 0.5 + pdx * Math.sin(wavePhase) * waveAmp;
@@ -523,17 +522,17 @@ class Renderer {
       ctx.stroke();
     }
 
-    // Layer 2: Drifting dust dots
-    const dotCount = Math.floor((4 + gust * 6) * intensityMult + strongMult * 20);
+    // === Layer 2: Drifting dust dots ===
+    const dotCount = Math.floor(8 + str * 20 + gust * 8);
     for (let i = 0; i < dotCount; i++) {
       const seed = i * 271.1 + 99;
-      const speed = effectiveStrength * (30 + (seed % 50));
+      const speed = (0.3 + effectiveStrength) * (30 + (seed % 50));
       const rawX = seed * 5.1 + t * speed * wdx;
       const rawY = seed * 3.3 + t * speed * wdy;
-      const x = ((rawX % this.width) + this.width) % this.width;
-      const y = ((rawY % this.height) + this.height) % this.height;
-      const alpha = (str < 0.5 ? 0.02 : 0.04) + gust * 0.04 * str;
-      const size = 0.5 + str * 0.6 + gust * 0.4;
+      const x = ((rawX % w) + w) % w;
+      const y = ((rawY % h) + h) % h;
+      const alpha = 0.06 + gust * 0.06 * str;
+      const size = 0.8 + str * 0.7 + gust * 0.4;
 
       ctx.globalAlpha = alpha;
       ctx.fillStyle = 'rgb(200, 220, 255)';
@@ -542,23 +541,23 @@ class Renderer {
       ctx.fill();
     }
 
-    // Layer 3: Strong wind — large fast-moving wisps
-    if (str >= 1.0) {
-      const wispCount = Math.floor(3 + (str - 1.0) * 8);
+    // === Layer 3: Large wisps (strong wind) ===
+    if (str >= 0.8) {
+      const wispCount = Math.floor(3 + (str - 0.8) * 6);
       for (let i = 0; i < wispCount; i++) {
         const seed = i * 331.7 + 77;
         const seed2 = i * 157.3 + 53;
         const speed = effectiveStrength * (90 + (seed % 60));
         const rawX = seed * 4.1 + t * speed * wdx;
         const rawY = seed2 * 2.9 + t * speed * wdy;
-        const baseX = ((rawX % this.width) + this.width) % this.width;
-        const baseY = ((rawY % this.height) + this.height) % this.height;
+        const baseX = ((rawX % w) + w) % w;
+        const baseY = ((rawY % h) + h) % h;
 
-        const wispLen = (60 + str * 60 + (seed % 40)) * gust;
+        const wispLen = (80 + str * 80 + (seed % 50)) * gust;
         const wavePhase = t * 1.2 + seed * 0.05;
-        const waveAmp = 8 + gust * 6;
+        const waveAmp = 10 + gust * 8;
 
-        const wispAlpha = 0.02 + (seed % 50) / 50 * 0.04 * gust;
+        const wispAlpha = 0.04 + (seed % 50) / 50 * 0.06 * gust;
 
         ctx.beginPath();
         ctx.strokeStyle = `rgba(200, 225, 255, ${wispAlpha})`;
@@ -570,11 +569,11 @@ class Renderer {
         const cy1 = baseY + wdy * wispLen * 0.33 + pdy * Math.sin(wavePhase) * waveAmp;
         const cx2 = baseX + wdx * wispLen * 0.66 + pdx * Math.sin(wavePhase + 1.5) * waveAmp;
         const cy2 = baseY + wdy * wispLen * 0.66 + pdy * Math.sin(wavePhase + 1.5) * waveAmp;
-        const ex = baseX + wdx * wispLen;
-        const ey = baseY + wdy * wispLen;
+        const endX = baseX + wdx * wispLen;
+        const endY = baseY + wdy * wispLen;
 
         ctx.moveTo(sx, sy);
-        ctx.bezierCurveTo(cx1, cy1, cx2, cy2, ex, ey);
+        ctx.bezierCurveTo(cx1, cy1, cx2, cy2, endX, endY);
         ctx.stroke();
       }
     }

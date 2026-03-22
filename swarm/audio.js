@@ -284,37 +284,35 @@ class AudioManager {
     const isStrongWind = windStrength >= 0.8;
     const isGale = windStrength >= 1.5;
 
-    // Layer 1: Low rumble noise — always present, subtle on weak wind
+    // Layer 1: Low rumble noise — always present
     if (this.windGain) {
       const rumbleVol = isStrongWind
-        ? windStrength * gust * 0.12   // Prominent on strong wind
-        : windStrength * gust * 0.03;  // Barely audible on weak wind
-      this.windGain.gain.linearRampToValueAtTime(clamp(rumbleVol, 0, 0.2), now + 0.15);
-      // Filter opens wider with strength: subtle → full-bodied
-      const windCutoff = 100 + windStrength * 200 + gust * windStrength * 150;
-      this.windFilter.frequency.linearRampToValueAtTime(clamp(windCutoff, 100, 600), now + 0.15);
+        ? windStrength * gust * 0.15   // Prominent on strong wind
+        : windStrength * gust * 0.05;  // Subtle on weak wind
+      this.windGain.gain.linearRampToValueAtTime(clamp(rumbleVol, 0, 0.25), now + 0.15);
+      const windCutoff = 120 + windStrength * 250 + gust * windStrength * 150;
+      this.windFilter.frequency.linearRampToValueAtTime(clamp(windCutoff, 120, 700), now + 0.15);
     }
 
-    // Layer 2: Wind howl — only audible on strong wind maps
+    // Layer 2: Wind howl — audible on strong wind maps
     if (this.windHowlGain) {
       if (isStrongWind) {
-        const howlIntensity = (windStrength - 0.6) / 1.4; // 0→1 over 0.6→2.0
-        const howlVol = howlIntensity * gust * 0.06;
-        this.windHowlGain.gain.linearRampToValueAtTime(clamp(howlVol, 0, 0.1), now + 0.2);
-        // Shift howl frequency with gusts for organic variation
-        const howlFreq = 200 + gust * 120 + windStrength * 40;
+        const howlIntensity = (windStrength - 0.5) / 1.5;
+        const howlVol = howlIntensity * gust * 0.08;
+        this.windHowlGain.gain.linearRampToValueAtTime(clamp(howlVol, 0, 0.12), now + 0.2);
+        const howlFreq = 200 + gust * 150 + windStrength * 50;
         this.windHowlFilter.frequency.linearRampToValueAtTime(howlFreq, now + 0.3);
       } else {
         this.windHowlGain.gain.linearRampToValueAtTime(0, now + 0.5);
       }
     }
 
-    // Layer 3: Wind whistle — only on gale-force wind
+    // Layer 3: Wind whistle — gale-force wind
     if (this.windWhistleGain) {
       if (isGale) {
-        const whistleIntensity = (windStrength - 1.3) / 0.7; // 0→1 over 1.3→2.0
-        const whistleVol = whistleIntensity * gust * 0.02; // Very subtle, eerie
-        this.windWhistleGain.gain.linearRampToValueAtTime(clamp(whistleVol, 0, 0.04), now + 0.2);
+        const whistleIntensity = (windStrength - 1.2) / 0.8;
+        const whistleVol = whistleIntensity * gust * 0.03;
+        this.windWhistleGain.gain.linearRampToValueAtTime(clamp(whistleVol, 0, 0.05), now + 0.2);
       } else {
         this.windWhistleGain.gain.linearRampToValueAtTime(0, now + 0.5);
       }
