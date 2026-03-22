@@ -197,10 +197,8 @@ function loadCurrentMap() {
   // Spawn enemy instances from map definitions
   state.enemies = state.map.enemyDefs.map(def => new Wasp(def, CANVAS_WIDTH, CANVAS_HEIGHT));
 
-  // Compute wind shadow (shelter behind obstacles)
-  if (state.map.wind) {
-    state.pheromoneGrid.computeWindShadow(state.map.wind.angle);
-  }
+  // Compute wind shadow (shelter behind obstacles) — all maps have wind
+  state.pheromoneGrid.computeWindShadow(state.map.wind.angle);
 
   // Create gust Perlin noise instance
   state.gustPerlin = new PerlinNoise(state.seed);
@@ -506,20 +504,16 @@ function simulationTick() {
     }
   }
 
-  // Compute gust factor for this tick
+  // Compute gust factor for this tick — all maps have wind
   const wind = state.map.wind;
-  if (wind && wind.strength > 0) {
-    const gustSpeed = wind.gustSpeed || 0.003;
-    const gustRange = wind.gustRange || 0.5;
-    const gustNoise = state.gustPerlin.noise2D(state.simTime * gustSpeed, 0);
-    // gustNoise is -1..1, map to (1-gustRange)..1
-    state.gustFactor = 1 - gustRange * 0.5 + gustNoise * gustRange * 0.5;
-    state.gustFactor = clamp(state.gustFactor, 0, 1);
-    // Attach to wind object for bees to read
-    wind.gustFactor = state.gustFactor;
-  } else {
-    state.gustFactor = 1.0;
-  }
+  const gustSpeed = wind.gustSpeed || 0.003;
+  const gustRange = wind.gustRange || 0.5;
+  const gustNoise = state.gustPerlin.noise2D(state.simTime * gustSpeed, 0);
+  // gustNoise is -1..1, map to (1-gustRange)..1
+  state.gustFactor = 1 - gustRange * 0.5 + gustNoise * gustRange * 0.5;
+  state.gustFactor = clamp(state.gustFactor, 0, 1);
+  // Attach to wind object for bees to read
+  wind.gustFactor = state.gustFactor;
 
   // Update pheromone grid with wind drift
   state.pheromoneGrid.update(DIFFUSION_RATE, EVAPORATION_RATE, wind, state.gustFactor);
@@ -682,10 +676,8 @@ function watchAgain() {
     }
   }
 
-  // Recompute wind shadow
-  if (state.map.wind) {
-    state.pheromoneGrid.computeWindShadow(state.map.wind.angle);
-  }
+  // Recompute wind shadow — all maps have wind
+  state.pheromoneGrid.computeWindShadow(state.map.wind.angle);
 
   for (const f of state.map.flowers) {
     f.resource = f.maxResource;
@@ -788,7 +780,7 @@ function gameLoop(timestamp) {
       swarmCenter.x,
       CANVAS_WIDTH,
       state.map.beeCount,
-      state.map.wind ? state.map.wind.strength : 0,
+      state.map.wind.strength,
       state.gustFactor
     );
   }

@@ -19,10 +19,19 @@ class AudioManager {
     this.swarmPanner = null;
     this.swarmFilter = null;
 
-    // Wind subsystem
+    // Wind subsystem — low rumble
     this.windNoiseSource = null;
     this.windGain = null;
     this.windFilter = null;
+
+    // Wind howl subsystem — mid-frequency moan for strong wind
+    this.windHowlOscs = [];
+    this.windHowlGain = null;
+    this.windHowlFilter = null;
+
+    // Wind whistle — high harmonics for gale-force
+    this.windWhistleOsc = null;
+    this.windWhistleGain = null;
 
     // State tracking
     this.lastHighwayIntensity = 0;
@@ -43,6 +52,8 @@ class AudioManager {
       this._initSwarmTexture();
       this._initHighwayChord();
       this._initWindNoise();
+      this._initWindHowl();
+      this._initWindWhistle();
       this.initialized = true;
     } catch (e) {
       console.warn('Audio initialization failed:', e);
@@ -142,6 +153,7 @@ class AudioManager {
 
   _initWindNoise() {
     // Low rumbling noise for wind — looping noise through lowpass
+    // Plays on ALL maps, volume scales with wind strength
     const bufferSize = this.ctx.sampleRate * 2;
     const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
     const data = noiseBuffer.getChannelData(0);
@@ -155,7 +167,7 @@ class AudioManager {
 
     this.windFilter = this.ctx.createBiquadFilter();
     this.windFilter.type = 'lowpass';
-    this.windFilter.frequency.value = 200; // Low rumble
+    this.windFilter.frequency.value = 150;
     this.windFilter.Q.value = 0.7;
 
     this.windGain = this.ctx.createGain();
@@ -165,6 +177,75 @@ class AudioManager {
     this.windFilter.connect(this.windGain);
     this.windGain.connect(this.masterGain);
     this.windNoiseSource.start();
+  }
+
+  _initWindHowl() {
+    // Mid-frequency moaning oscillators for strong wind (>=0.8 strength)
+    // Two detuned triangle waves that create an eerie wind howl
+    this.windHowlFilter = this.ctx.createBiquadFilter();
+    this.windHowlFilter.type = 'bandpass';
+    this.windHowlFilter.frequency.value = 250;
+    this.windHowlFilter.Q.value = 1.5;
+
+    this.windHowlGain = this.ctx.createGain();
+    this.windHowlGain.gain.value = 0;
+
+    this.windHowlFilter.connect(this.windHowlGain);
+    this.windHowlGain.connect(this.masterGain);
+
+    // Two detuned triangle oscillators for organic howl
+    const howlFreqs = [95, 142]; // Low moaning tones
+    for (const freq of howlFreqs) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      osc.connect(this.windHowlFilter);
+      osc.start();
+      this.windHowlOscs.push(osc);
+    }
+
+    // Slow LFO on the howl frequency for pitch drift (wind moaning)
+    const howlLfo = this.ctx.createOscillator();
+    howlLfo.type = 'sine';
+    howlLfo.frequency.value = 0.15; // Slow drift
+    const howlLfoGain = this.ctx.createGain();
+    howlLfoGain.gain.value = 15; // +/- 15 Hz drift
+    howlLfo.connect(howlLfoGain);
+    for (const osc of this.windHowlOscs) {
+      howlLfoGain.connect(osc.frequency);
+    }
+    howlLfo.start();
+  }
+
+  _initWindWhistle() {
+    // High-pitched whistle for gale-force wind (>=1.5 strength)
+    // Sine wave with heavy vibrato — wind screaming through gaps
+    this.windWhistleOsc = this.ctx.createOscillator();
+    this.windWhistleOsc.type = 'sine';
+    this.windWhistleOsc.frequency.value = 800;
+
+    const whistleFilter = this.ctx.createBiquadFilter();
+    whistleFilter.type = 'bandpass';
+    whistleFilter.frequency.value = 900;
+    whistleFilter.Q.value = 4;
+
+    this.windWhistleGain = this.ctx.createGain();
+    this.windWhistleGain.gain.value = 0;
+
+    this.windWhistleOsc.connect(whistleFilter);
+    whistleFilter.connect(this.windWhistleGain);
+    this.windWhistleGain.connect(this.masterGain);
+    this.windWhistleOsc.start();
+
+    // Fast vibrato LFO for the whistle
+    const whistleLfo = this.ctx.createOscillator();
+    whistleLfo.type = 'sine';
+    whistleLfo.frequency.value = 3.5; // Rapid wobble
+    const whistleLfoGain = this.ctx.createGain();
+    whistleLfoGain.gain.value = 80; // Wide pitch range
+    whistleLfo.connect(whistleLfoGain);
+    whistleLfoGain.connect(this.windWhistleOsc.frequency);
+    whistleLfo.start();
   }
 
   // Called each frame from main loop
@@ -198,16 +279,45 @@ class AudioManager {
     const highwayVol = smoothstep(0.1, 0.5, normalizedRecruitment) * 0.12;
     this.highwayGain.gain.linearRampToValueAtTime(highwayVol, now + 0.3);
 
-    // Wind noise: volume and filter cutoff driven by wind strength and gust
-    if (windStrength > 0 && this.windGain) {
-      const gust = gustFactor || 1;
-      const windVol = windStrength * gust * 0.08; // Subtle but present
-      this.windGain.gain.linearRampToValueAtTime(clamp(windVol, 0, 0.15), now + 0.15);
-      // Higher gusts open the filter for more presence
-      const windCutoff = 150 + gust * windStrength * 250; // 150-400 Hz range
-      this.windFilter.frequency.linearRampToValueAtTime(windCutoff, now + 0.15);
-    } else if (this.windGain) {
-      this.windGain.gain.linearRampToValueAtTime(0, now + 0.3);
+    // === WIND AUDIO (all maps — scales with strength) ===
+    const gust = gustFactor || 1;
+    const isStrongWind = windStrength >= 0.8;
+    const isGale = windStrength >= 1.5;
+
+    // Layer 1: Low rumble noise — always present, subtle on weak wind
+    if (this.windGain) {
+      const rumbleVol = isStrongWind
+        ? windStrength * gust * 0.12   // Prominent on strong wind
+        : windStrength * gust * 0.03;  // Barely audible on weak wind
+      this.windGain.gain.linearRampToValueAtTime(clamp(rumbleVol, 0, 0.2), now + 0.15);
+      // Filter opens wider with strength: subtle → full-bodied
+      const windCutoff = 100 + windStrength * 200 + gust * windStrength * 150;
+      this.windFilter.frequency.linearRampToValueAtTime(clamp(windCutoff, 100, 600), now + 0.15);
+    }
+
+    // Layer 2: Wind howl — only audible on strong wind maps
+    if (this.windHowlGain) {
+      if (isStrongWind) {
+        const howlIntensity = (windStrength - 0.6) / 1.4; // 0→1 over 0.6→2.0
+        const howlVol = howlIntensity * gust * 0.06;
+        this.windHowlGain.gain.linearRampToValueAtTime(clamp(howlVol, 0, 0.1), now + 0.2);
+        // Shift howl frequency with gusts for organic variation
+        const howlFreq = 200 + gust * 120 + windStrength * 40;
+        this.windHowlFilter.frequency.linearRampToValueAtTime(howlFreq, now + 0.3);
+      } else {
+        this.windHowlGain.gain.linearRampToValueAtTime(0, now + 0.5);
+      }
+    }
+
+    // Layer 3: Wind whistle — only on gale-force wind
+    if (this.windWhistleGain) {
+      if (isGale) {
+        const whistleIntensity = (windStrength - 1.3) / 0.7; // 0→1 over 1.3→2.0
+        const whistleVol = whistleIntensity * gust * 0.02; // Very subtle, eerie
+        this.windWhistleGain.gain.linearRampToValueAtTime(clamp(whistleVol, 0, 0.04), now + 0.2);
+      } else {
+        this.windWhistleGain.gain.linearRampToValueAtTime(0, now + 0.5);
+      }
     }
   }
 
@@ -327,6 +437,8 @@ class AudioManager {
     this.swarmGain.gain.setValueAtTime(0, now);
     this.highwayGain.gain.setValueAtTime(0, now);
     if (this.windGain) this.windGain.gain.setValueAtTime(0, now);
+    if (this.windHowlGain) this.windHowlGain.gain.setValueAtTime(0, now);
+    if (this.windWhistleGain) this.windWhistleGain.gain.setValueAtTime(0, now);
   }
 
   // Cleanup

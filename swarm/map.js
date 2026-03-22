@@ -22,16 +22,21 @@ const ZONE_VISUALS = {
 
 // All positions in normalized [0-1] coordinates
 const MAPS = [
+  // ──────────────────────────────────────────────
+  // ACT 1: LEARNING THE SWARM
+  // ──────────────────────────────────────────────
+
   // === MAP 1: Tutorial — can't lose ===
   {
     id: 1,
-    name: 'First Flight',
-    description: 'Place your hive and watch the bees find food.',
+    name: 'First Light',
+    description: 'A meadow at dawn. Place your hive near the flowers.',
     hivesAllowed: 1,
     beeCount: 150,
     simDuration: 45,
-    starThresholds: [20, 35, 50], // Very easy — can't lose
+    starThresholds: [20, 35, 50],
     flowers: [
+      // Tight cluster — impossible to miss
       { x: 0.55, y: 0.42, resource: 30, color: 'green' },
       { x: 0.52, y: 0.48, resource: 25, color: 'purple' },
       { x: 0.58, y: 0.50, resource: 28, color: 'pink' },
@@ -39,181 +44,209 @@ const MAPS = [
       { x: 0.57, y: 0.45, resource: 26, color: 'white' },
     ],
     obstacles: [],
+    wind: { angle: Math.PI * 0.15, strength: 0.15, gustSpeed: 0.001, gustRange: 0.2 },
   },
 
-  // === MAP 2: Fork — two clusters ===
+  // === MAP 2: The fork — two paths ===
   {
     id: 2,
-    name: 'Fork',
-    description: 'Two clusters. Watch the swarm split.',
+    name: 'Two Meadows',
+    description: 'North or south? The swarm will decide.',
     hivesAllowed: 1,
     beeCount: 200,
     simDuration: 50,
     starThresholds: [50, 75, 90],
     flowers: [
-      // Upper-right cluster
+      // Upper cluster
       { x: 0.78, y: 0.22, resource: 25, color: 'purple' },
       { x: 0.82, y: 0.25, resource: 30, color: 'green' },
       { x: 0.80, y: 0.18, resource: 22, color: 'pink' },
       { x: 0.76, y: 0.26, resource: 28, color: 'white' },
-      // Lower-right cluster
+      // Lower cluster
       { x: 0.78, y: 0.75, resource: 25, color: 'green' },
       { x: 0.82, y: 0.72, resource: 30, color: 'purple' },
       { x: 0.80, y: 0.78, resource: 22, color: 'blue' },
       { x: 0.76, y: 0.70, resource: 28, color: 'pink' },
     ],
     obstacles: [],
+    wind: { angle: Math.PI * 1.7, strength: 0.2, gustSpeed: 0.0015, gustRange: 0.25 },
   },
 
-  // === MAP 3: Still Waters — introduces NO-HIVE ZONES ===
+  // ──────────────────────────────────────────────
+  // ACT 2: THE TERRAIN
+  // ──────────────────────────────────────────────
+
+  // === MAP 3: The lake — ZONE MAP ===
   {
     id: 3,
-    name: 'Still Waters',
-    description: 'Water blocks the obvious path. Place around it.',
+    name: 'The Lake',
+    description: 'A body of water lies between you and the garden.',
     hivesAllowed: 1,
     beeCount: 180,
     simDuration: 50,
     starThresholds: [45, 70, 88],
     flowers: [
-      { x: 0.75, y: 0.35, resource: 28, color: 'green' },
-      { x: 0.78, y: 0.42, resource: 30, color: 'purple' },
-      { x: 0.72, y: 0.50, resource: 25, color: 'pink' },
-      { x: 0.76, y: 0.58, resource: 28, color: 'white' },
-      { x: 0.80, y: 0.65, resource: 32, color: 'blue' },
+      // Garden on the far side of the lake
+      { x: 0.80, y: 0.30, resource: 28, color: 'green' },
+      { x: 0.82, y: 0.42, resource: 30, color: 'purple' },
+      { x: 0.78, y: 0.50, resource: 25, color: 'pink' },
+      { x: 0.84, y: 0.58, resource: 28, color: 'white' },
+      { x: 0.80, y: 0.68, resource: 32, color: 'blue' },
     ],
     obstacles: [],
     zones: [
-      // Large water zone blocking the center — forces hive to the sides
-      { type: 'no-hive', shape: 'rect', x: 0.25, y: 0.20, w: 0.30, h: 0.55, visual: 'water' },
+      // The lake — large, central, forces you to pick a side
+      { type: 'no-hive', shape: 'circle', x: 0.45, y: 0.48, r: 0.15, visual: 'water' },
     ],
+    wind: { angle: Math.PI * 0.5, strength: 0.25, gustSpeed: 0.002, gustRange: 0.3 },
   },
 
-  // === MAP 4: Headwind — introduces WIND ===
+  // ──────────────────────────────────────────────
+  // ACT 3: THE WIND
+  // ──────────────────────────────────────────────
+
+  // === MAP 4: Open gale — pure WIND MAP ===
   {
     id: 4,
-    name: 'Headwind',
-    description: 'Wind blows east. Place wisely.',
+    name: 'Open Gale',
+    description: 'No shelter. The wind takes everything.',
     hivesAllowed: 1,
     beeCount: 200,
     simDuration: 55,
-    starThresholds: [45, 68, 85],
+    starThresholds: [40, 62, 82],
     flowers: [
-      { x: 0.18, y: 0.35, resource: 30, color: 'green' },
-      { x: 0.15, y: 0.45, resource: 28, color: 'purple' },
-      { x: 0.20, y: 0.55, resource: 32, color: 'pink' },
-      { x: 0.12, y: 0.50, resource: 25, color: 'white' },
-      { x: 0.22, y: 0.42, resource: 28, color: 'blue' },
+      // Flowers upwind (left) — bees must fight the wind to reach them
+      { x: 0.15, y: 0.30, resource: 25, color: 'green' },
+      { x: 0.18, y: 0.45, resource: 30, color: 'purple' },
+      { x: 0.12, y: 0.55, resource: 28, color: 'pink' },
+      { x: 0.20, y: 0.65, resource: 25, color: 'white' },
+      // A few downwind (easier but smaller)
+      { x: 0.80, y: 0.40, resource: 12, color: 'blue' },
+      { x: 0.82, y: 0.60, resource: 10, color: 'green' },
     ],
     obstacles: [],
-    wind: { angle: 0, strength: 1.2, gustSpeed: 0.003, gustRange: 0.5 }, // Strong eastward wind with gusts
+    wind: { angle: 0, strength: 2.0, gustSpeed: 0.004, gustRange: 0.7 },
   },
 
-  // === MAP 5: The Wall — obstacles + wind ===
+  // === MAP 5: Windbreak — WIND + SHELTER MAP ===
   {
     id: 5,
-    name: 'The Wall',
-    description: 'A barrier and crosswind. Find the gap.',
+    name: 'Windbreak',
+    description: 'The wall blocks the wind. Use its shadow.',
     hivesAllowed: 1,
     beeCount: 200,
     simDuration: 55,
     starThresholds: [40, 65, 85],
     flowers: [
-      { x: 0.75, y: 0.30, resource: 30, color: 'green' },
-      { x: 0.78, y: 0.35, resource: 28, color: 'purple' },
-      { x: 0.80, y: 0.50, resource: 35, color: 'pink' },
-      { x: 0.76, y: 0.65, resource: 28, color: 'green' },
-      { x: 0.82, y: 0.60, resource: 32, color: 'white' },
+      // Flowers on the far side of the wall
+      { x: 0.75, y: 0.25, resource: 28, color: 'green' },
+      { x: 0.78, y: 0.40, resource: 32, color: 'purple' },
+      { x: 0.80, y: 0.55, resource: 35, color: 'pink' },
+      { x: 0.76, y: 0.70, resource: 28, color: 'green' },
+      { x: 0.82, y: 0.85, resource: 30, color: 'white' },
     ],
     obstacles: [
-      // Vertical wall with gap
-      { type: 'rect', x: 0.54, y: 0.0, w: 0.02, h: 0.36 },
-      { type: 'rect', x: 0.54, y: 0.48, w: 0.02, h: 0.52 },
+      // Tall wall — acts as windbreak, gap in the middle
+      { type: 'rect', x: 0.50, y: 0.0, w: 0.025, h: 0.40 },
+      { type: 'rect', x: 0.50, y: 0.55, w: 0.025, h: 0.45 },
     ],
-    wind: { angle: Math.PI * 0.5, strength: 0.8, gustSpeed: 0.004, gustRange: 0.4 }, // Moderate crosswind with gusts
+    wind: { angle: 0, strength: 1.6, gustSpeed: 0.005, gustRange: 0.6 },
   },
 
-  // === MAP 6: Patrol — introduces ENEMIES ===
+  // ──────────────────────────────────────────────
+  // ACT 4: THE PREDATORS
+  // ──────────────────────────────────────────────
+
+  // === MAP 6: The sentinel — single WASP MAP ===
   {
     id: 6,
-    name: 'Patrol',
-    description: 'Wasps guard the flowers. Plan your route.',
+    name: 'The Sentinel',
+    description: 'One wasp patrols the corridor. Time your placement.',
     hivesAllowed: 1,
     beeCount: 200,
     simDuration: 55,
     starThresholds: [40, 65, 85],
     flowers: [
-      { x: 0.78, y: 0.30, resource: 30, color: 'green' },
-      { x: 0.82, y: 0.38, resource: 32, color: 'purple' },
-      { x: 0.75, y: 0.50, resource: 28, color: 'pink' },
-      { x: 0.80, y: 0.60, resource: 30, color: 'white' },
-      { x: 0.77, y: 0.70, resource: 25, color: 'blue' },
+      // Rich garden behind the wasp's patrol line
+      { x: 0.80, y: 0.25, resource: 35, color: 'green' },
+      { x: 0.82, y: 0.40, resource: 30, color: 'purple' },
+      { x: 0.78, y: 0.55, resource: 32, color: 'pink' },
+      { x: 0.84, y: 0.65, resource: 28, color: 'white' },
+      { x: 0.80, y: 0.78, resource: 30, color: 'blue' },
     ],
     obstacles: [],
     enemies: [
-      // Single wasp patrolling vertically between hive area and flowers
-      { type: 'wasp', patrol: [{ x: 0.55, y: 0.20 }, { x: 0.55, y: 0.80 }], speed: 1.2, killRadius: 30 },
+      // Single wasp — long vertical patrol
+      { type: 'wasp', patrol: [{ x: 0.55, y: 0.10 }, { x: 0.55, y: 0.90 }], speed: 1.2, killRadius: 30 },
     ],
+    wind: { angle: Math.PI * 1.2, strength: 0.2, gustSpeed: 0.0015, gustRange: 0.2 },
   },
 
-  // === MAP 7: Gauntlet — enemies + MORTALITY ===
+  // === MAP 7: Kill zone — MORTALITY MAP ===
   {
     id: 7,
-    name: 'Gauntlet',
-    description: 'Multiple wasps. Every bee counts.',
+    name: 'Kill Zone',
+    description: 'Three wasps. Your bees will not all return.',
     hivesAllowed: 1,
     beeCount: 250,
     simDuration: 60,
-    starThresholds: [35, 55, 78],
+    starThresholds: [30, 50, 72],
     flowers: [
-      { x: 0.82, y: 0.25, resource: 35, color: 'green' },
-      { x: 0.85, y: 0.45, resource: 40, color: 'purple' },
-      { x: 0.80, y: 0.65, resource: 35, color: 'pink' },
-      { x: 0.88, y: 0.55, resource: 30, color: 'white' },
+      // High-value targets behind enemy lines
+      { x: 0.85, y: 0.20, resource: 40, color: 'green' },
+      { x: 0.88, y: 0.50, resource: 45, color: 'purple' },
+      { x: 0.82, y: 0.75, resource: 40, color: 'pink' },
     ],
     obstacles: [],
     enemies: [
-      // Three wasps patrolling at different heights
-      { type: 'wasp', patrol: [{ x: 0.40, y: 0.20 }, { x: 0.70, y: 0.20 }], speed: 1.5, killRadius: 25 },
-      { type: 'wasp', patrol: [{ x: 0.70, y: 0.50 }, { x: 0.40, y: 0.50 }], speed: 1.3, killRadius: 25 },
-      { type: 'wasp', patrol: [{ x: 0.40, y: 0.80 }, { x: 0.70, y: 0.80 }], speed: 1.5, killRadius: 25 },
+      // Three wasps in staggered horizontal patrols
+      { type: 'wasp', patrol: [{ x: 0.35, y: 0.22 }, { x: 0.72, y: 0.22 }], speed: 1.5, killRadius: 28 },
+      { type: 'wasp', patrol: [{ x: 0.72, y: 0.50 }, { x: 0.35, y: 0.50 }], speed: 1.3, killRadius: 28 },
+      { type: 'wasp', patrol: [{ x: 0.35, y: 0.78 }, { x: 0.72, y: 0.78 }], speed: 1.5, killRadius: 28 },
     ],
-    mortality: true, // Bees die permanently when killed
+    mortality: true,
+    wind: { angle: Math.PI * 0.3, strength: 0.3, gustSpeed: 0.002, gustRange: 0.25 },
   },
 
-  // === MAP 8: Storm Garden — ALL MECHANICS ===
+  // ──────────────────────────────────────────────
+  // ACT 5: THE STORM
+  // ──────────────────────────────────────────────
+
+  // === MAP 8: Storm Garden — EVERYTHING ===
   {
     id: 8,
-    name: 'Storm Garden',
-    description: 'Wind, wasps, water, and will. The final test.',
+    name: 'The Storm',
+    description: 'Wind. Wasps. Water. Survive and harvest.',
     hivesAllowed: 2,
     beeCount: 300,
     simDuration: 65,
-    starThresholds: [30, 50, 75],
+    starThresholds: [25, 45, 70],
     flowers: [
-      // Scattered across the map
-      { x: 0.12, y: 0.15, resource: 20, color: 'green' },
-      { x: 0.85, y: 0.20, resource: 30, color: 'purple' },
-      { x: 0.50, y: 0.12, resource: 22, color: 'pink' },
-      { x: 0.88, y: 0.50, resource: 35, color: 'blue' },
-      { x: 0.15, y: 0.75, resource: 25, color: 'white' },
-      { x: 0.75, y: 0.80, resource: 28, color: 'green' },
-      { x: 0.50, y: 0.85, resource: 20, color: 'purple' },
-      { x: 0.30, y: 0.40, resource: 18, color: 'pink' },
+      // Scattered — forces tough decisions about which to pursue
+      { x: 0.10, y: 0.15, resource: 22, color: 'green' },
+      { x: 0.88, y: 0.18, resource: 35, color: 'purple' },
+      { x: 0.50, y: 0.10, resource: 20, color: 'pink' },
+      { x: 0.90, y: 0.50, resource: 38, color: 'blue' },
+      { x: 0.12, y: 0.80, resource: 25, color: 'white' },
+      { x: 0.78, y: 0.82, resource: 30, color: 'green' },
+      { x: 0.50, y: 0.88, resource: 18, color: 'purple' },
+      { x: 0.32, y: 0.45, resource: 20, color: 'pink' },
     ],
     obstacles: [
-      // A few walls to funnel movement
-      { type: 'rect', x: 0.45, y: 0.30, w: 0.02, h: 0.25 },
+      // Two walls — create shelter pockets
+      { type: 'rect', x: 0.42, y: 0.25, w: 0.025, h: 0.22 },
+      { type: 'rect', x: 0.58, y: 0.55, w: 0.025, h: 0.22 },
     ],
     zones: [
-      // Water in upper-center
-      { type: 'no-hive', shape: 'circle', x: 0.50, y: 0.35, r: 0.08, visual: 'water' },
-      // Mud slow zone in lower area
-      { type: 'slow', shape: 'rect', x: 0.35, y: 0.70, w: 0.30, h: 0.12, visual: 'mud', speedMult: 0.4 },
+      // The lake
+      { type: 'no-hive', shape: 'circle', x: 0.50, y: 0.42, r: 0.07, visual: 'water' },
+      // Mud slows bees in the south
+      { type: 'slow', shape: 'rect', x: 0.30, y: 0.72, w: 0.35, h: 0.10, visual: 'mud', speedMult: 0.4 },
     ],
-    wind: { angle: Math.PI * 0.75, strength: 1.0, gustSpeed: 0.005, gustRange: 0.6 }, // Strong south-west storm with heavy gusts
+    wind: { angle: Math.PI * 0.75, strength: 1.8, gustSpeed: 0.006, gustRange: 0.7 },
     enemies: [
-      { type: 'wasp', patrol: [{ x: 0.30, y: 0.25 }, { x: 0.70, y: 0.25 }], speed: 1.3, killRadius: 25 },
-      { type: 'wasp', patrol: [{ x: 0.60, y: 0.55 }, { x: 0.60, y: 0.85 }], speed: 1.1, killRadius: 25 },
+      { type: 'wasp', patrol: [{ x: 0.25, y: 0.20 }, { x: 0.70, y: 0.30 }], speed: 1.3, killRadius: 25 },
+      { type: 'wasp', patrol: [{ x: 0.65, y: 0.60 }, { x: 0.65, y: 0.88 }], speed: 1.1, killRadius: 25 },
     ],
     mortality: true,
   },
@@ -308,8 +341,13 @@ function loadMap(mapIndex, canvasWidth, canvasHeight, pheromoneGrid) {
       }
       return resolved;
     }),
-    // Resolve wind
-    wind: def.wind ? { angle: def.wind.angle, strength: def.wind.strength } : null,
+    // Resolve wind (preserve gust params for audio/visual scaling)
+    wind: def.wind ? {
+      angle: def.wind.angle,
+      strength: def.wind.strength,
+      gustSpeed: def.wind.gustSpeed || 0.003,
+      gustRange: def.wind.gustRange || 0.5,
+    } : null,
     // Enemies are resolved at runtime (need canvas dimensions)
     enemyDefs: def.enemies || [],
   };
@@ -416,7 +454,12 @@ function generateFreeplayMap(seed, canvasWidth, canvasHeight, pheromoneGrid) {
     flowers,
     obstacles,
     zones: [],
-    wind: null,
+    wind: {
+      angle: rng.range(0, Math.PI * 2),
+      strength: rng.range(0.15, 0.35),
+      gustSpeed: 0.002,
+      gustRange: 0.25,
+    },
     enemyDefs: [],
   };
 

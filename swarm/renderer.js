@@ -165,9 +165,14 @@ class Renderer {
       this._drawZones(ctx, state.map.zones, timestamp);
     }
 
-    // 2b. Wind exposure overlay (placement phase only, shows shelter)
+    // 2b. Wind exposure overlay (placement phase, shows shelter)
     if (state.map && state.map.wind && state.pheromoneGrid && state.phase === 'placement') {
       this._drawWindExposure(ctx, state.pheromoneGrid);
+    }
+
+    // 2c. Directional wind haze (strong wind maps — always visible)
+    if (state.map && state.map.wind && state.map.wind.strength >= 0.8) {
+      this._drawWindHaze(ctx, state.map.wind, timestamp, state.gustFactor);
     }
 
     // 3. Obstacles
@@ -175,7 +180,7 @@ class Renderer {
       this._drawObstacles(ctx, state.map.obstacles);
     }
 
-    // 3b. Wind indicator (during placement)
+    // 3b. Wind indicator (during placement — always shown, scales with strength)
     if (state.map && state.map.wind && state.phase === 'placement') {
       this._drawWindIndicator(ctx, state.map.wind, timestamp, state.gustFactor);
     }
@@ -193,8 +198,8 @@ class Renderer {
       this._drawPheromoneField(ctx, state.pheromoneGrid);
     }
 
-    // 5b. Wind particles during sim (gust-responsive)
-    if (state.map && state.map.wind && state.phase !== 'placement' && state.phase !== 'results') {
+    // 5b. Wind particles (all maps, all non-results phases — scales with strength)
+    if (state.map && state.map.wind && state.phase !== 'results') {
       this._drawWindParticles(ctx, state.map.wind, timestamp, state.gustFactor);
     }
 
@@ -339,19 +344,29 @@ class Renderer {
     const cx = this.width / 2;
     const cy = 65;
     const gust = gustFactor || 1;
-    const arrowLen = (30 + wind.strength * 20) * gust;
+    const str = wind.strength;
+    const isStrong = str >= 0.8;
+    const arrowLen = (20 + str * 25) * gust;
 
     ctx.save();
-    ctx.globalAlpha = 0.2 + gust * 0.15;
-    ctx.strokeStyle = 'rgba(180, 200, 255, 0.6)';
-    ctx.lineWidth = 1.5;
-    ctx.fillStyle = 'rgba(180, 200, 255, 0.4)';
+    const baseAlpha = isStrong ? 0.35 + gust * 0.2 : 0.15 + gust * 0.1;
+    ctx.globalAlpha = baseAlpha;
 
-    // Draw 3 wind arrows spread vertically
-    for (let i = -1; i <= 1; i++) {
-      const ox = cx + i * 25;
+    // Strong wind: warmer tint, thicker lines
+    const color = isStrong ? '200, 220, 255' : '180, 200, 255';
+    ctx.strokeStyle = `rgba(${color}, 0.7)`;
+    ctx.lineWidth = isStrong ? 2 : 1.5;
+    ctx.fillStyle = `rgba(${color}, 0.5)`;
+
+    // Arrow count scales with strength
+    const arrowCount = isStrong ? 5 : 3;
+    const spread = isStrong ? 20 : 25;
+
+    for (let i = 0; i < arrowCount; i++) {
+      const offset = (i - (arrowCount - 1) / 2) * spread;
+      const ox = cx + offset;
       const oy = cy;
-      const drift = Math.sin(timestamp * 0.003 + i) * 3 * gust;
+      const drift = Math.sin(timestamp * 0.003 + i * 1.2) * (3 + str * 2) * gust;
 
       const ex = ox + Math.cos(wind.angle) * (arrowLen + drift);
       const ey = oy + Math.sin(wind.angle) * (arrowLen + drift);
@@ -361,7 +376,7 @@ class Renderer {
       ctx.lineTo(ex, ey);
       ctx.stroke();
 
-      const headLen = 6 * gust;
+      const headLen = (5 + str * 3) * gust;
       const headAngle = 0.4;
       ctx.beginPath();
       ctx.moveTo(ex, ey);
@@ -377,39 +392,193 @@ class Renderer {
       ctx.fill();
     }
 
-    // Label with strength indicator
-    ctx.fillStyle = 'rgba(180, 200, 255, 0.3)';
-    ctx.font = '8px "Space Mono", monospace';
+    // Label with strength tier
+    ctx.fillStyle = `rgba(${color}, 0.4)`;
+    ctx.font = `${isStrong ? 9 : 8}px "Space Mono", monospace`;
     ctx.textAlign = 'center';
-    const strengthLabel = wind.strength >= 1.0 ? 'STRONG WIND' : 'WIND';
+    let strengthLabel;
+    if (str >= 1.5) strengthLabel = 'GALE';
+    else if (str >= 0.8) strengthLabel = 'STRONG WIND';
+    else if (str >= 0.3) strengthLabel = 'BREEZE';
+    else strengthLabel = 'LIGHT AIR';
     ctx.fillText(strengthLabel, cx, cy - 22);
 
     ctx.restore();
   }
 
-  // === WIND PARTICLES (during sim, gust-responsive) ===
+  // === DIRECTIONAL WIND HAZE (strong wind maps — atmospheric overlay) ===
+  _drawWindHaze(ctx, wind, timestamp, gustFactor) {
+    const gust = gustFactor || 1;
+    const str = wind.strength;
+    const t = timestamp * 0.001;
+    const wdx = Math.cos(wind.angle);
+    const wdy = Math.sin(wind.angle);
+
+    ctx.save();
+
+    // Gradient haze bands that drift with wind direction
+    const bandCount = Math.floor(3 + str * 3);
+    for (let i = 0; i < bandCount; i++) {
+      const seed = i * 137.5 + 31;
+      const speed = str * (15 + (seed % 20));
+      const rawOffset = seed * 7.3 + t * speed;
+
+      // Position bands perpendicular to wind direction
+      const perpX = -wdy;
+      const perpY = wdx;
+      const bandPos = ((rawOffset % (this.width + this.height)) + this.width) % (this.width + this.height);
+
+      // Band center moves along wind direction
+      const cx = bandPos * wdx + (this.width / 2) * perpX + Math.sin(t * 0.5 + seed) * 30;
+      const cy = bandPos * wdy + (this.height / 2) * perpY + Math.cos(t * 0.7 + seed) * 20;
+
+      // Elongated ellipse along wind direction
+      const bandLen = 200 + str * 150 + (seed % 100);
+      const bandWidth = 40 + (seed % 30);
+      const alpha = (0.015 + gust * 0.02) * Math.min(str / 1.5, 1);
+
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = 'rgb(160, 190, 240)';
+
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, bandLen, bandWidth, wind.angle, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Edge darkening on the windward side (vignette)
+    const vignetteAlpha = 0.04 * Math.min(str / 1.5, 1) * gust;
+    if (vignetteAlpha > 0.005) {
+      const gradX = this.width / 2 - wdx * this.width * 0.6;
+      const gradY = this.height / 2 - wdy * this.height * 0.6;
+      const gradEndX = this.width / 2 + wdx * this.width * 0.4;
+      const gradEndY = this.height / 2 + wdy * this.height * 0.4;
+      const grad = ctx.createLinearGradient(gradX, gradY, gradEndX, gradEndY);
+      grad.addColorStop(0, `rgba(140, 170, 220, ${vignetteAlpha})`);
+      grad.addColorStop(0.4, 'rgba(140, 170, 220, 0)');
+      grad.addColorStop(1, 'rgba(140, 170, 220, 0)');
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, this.width, this.height);
+    }
+
+    ctx.restore();
+  }
+
+  // === WIND STREAKS (all phases except results, strength-scaled) ===
   _drawWindParticles(ctx, wind, timestamp, gustFactor) {
     const gust = gustFactor || 1;
-    ctx.globalAlpha = 0.03 + gust * 0.06; // More visible during gusts
-    ctx.fillStyle = 'rgb(180, 200, 255)';
-
-    // Draw drifting streaks, count increases with gust
-    const count = Math.floor(8 + gust * 12);
     const t = timestamp * 0.001;
-    const effectiveStrength = wind.strength * gust;
-    for (let i = 0; i < count; i++) {
-      const seed = i * 137.5;
-      const baseX = ((seed + t * effectiveStrength * 80 * Math.cos(wind.angle)) % this.width + this.width) % this.width;
-      const baseY = ((seed * 0.7 + t * effectiveStrength * 80 * Math.sin(wind.angle)) % this.height + this.height) % this.height;
-      const len = (8 + effectiveStrength * 15) * gust;
+    const str = wind.strength;
+    const effectiveStrength = str * gust;
+    const wdx = Math.cos(wind.angle);
+    const wdy = Math.sin(wind.angle);
+    // Perpendicular for slight wave
+    const pdx = -wdy;
+    const pdy = wdx;
 
-      ctx.fillRect(
-        baseX,
-        baseY,
-        Math.cos(wind.angle) * len,
-        Math.sin(wind.angle) * len
-      );
+    // Strength multiplier for particle counts and alpha (subtle→dramatic)
+    const intensityMult = Math.min(str / 0.3, 1); // ramps from 0→1 over strength 0→0.3
+    const strongMult = str >= 0.8 ? (str - 0.5) / 1.5 : 0; // extra boost for strong wind
+
+    // Layer 1: Flowing streaks
+    const streakCount = Math.floor((5 + gust * 8) * intensityMult + strongMult * 30);
+    ctx.lineCap = 'round';
+
+    for (let i = 0; i < streakCount; i++) {
+      const seed = i * 197.3 + 42;
+      const seed2 = i * 83.7 + 17;
+
+      // Base position wraps across canvas
+      const speed = effectiveStrength * (60 + (seed % 40));
+      const rawX = seed * 3.7 + t * speed * wdx;
+      const rawY = seed2 * 2.3 + t * speed * wdy;
+      const baseX = ((rawX % this.width) + this.width) % this.width;
+      const baseY = ((rawY % this.height) + this.height) % this.height;
+
+      // Streak length varies with strength and gust
+      const len = (10 + effectiveStrength * 40 + (seed % 20)) * gust;
+
+      // Slight wave motion perpendicular to wind
+      const wavePhase = t * (1.5 + str) + seed * 0.1;
+      const waveAmp = 2 + gust * 3 + str * 3;
+
+      // Alpha: subtle on weak wind, visible on strong
+      const baseAlpha = str < 0.5 ? 0.015 : 0.03;
+      const brightness = baseAlpha + (seed % 100) / 100 * (0.03 + strongMult * 0.08) * gust;
+
+      ctx.beginPath();
+      ctx.strokeStyle = `rgba(180, 210, 255, ${brightness})`;
+      ctx.lineWidth = 0.3 + str * 0.5 + gust * 0.5;
+
+      // 3-point curve: start, wave peak, end
+      const sx = baseX;
+      const sy = baseY;
+      const mx = baseX + wdx * len * 0.5 + pdx * Math.sin(wavePhase) * waveAmp;
+      const my = baseY + wdy * len * 0.5 + pdy * Math.sin(wavePhase) * waveAmp;
+      const ex = baseX + wdx * len + pdx * Math.sin(wavePhase + 1) * waveAmp * 0.5;
+      const ey = baseY + wdy * len + pdy * Math.sin(wavePhase + 1) * waveAmp * 0.5;
+
+      ctx.moveTo(sx, sy);
+      ctx.quadraticCurveTo(mx, my, ex, ey);
+      ctx.stroke();
     }
+
+    // Layer 2: Drifting dust dots
+    const dotCount = Math.floor((4 + gust * 6) * intensityMult + strongMult * 20);
+    for (let i = 0; i < dotCount; i++) {
+      const seed = i * 271.1 + 99;
+      const speed = effectiveStrength * (30 + (seed % 50));
+      const rawX = seed * 5.1 + t * speed * wdx;
+      const rawY = seed * 3.3 + t * speed * wdy;
+      const x = ((rawX % this.width) + this.width) % this.width;
+      const y = ((rawY % this.height) + this.height) % this.height;
+      const alpha = (str < 0.5 ? 0.02 : 0.04) + gust * 0.04 * str;
+      const size = 0.5 + str * 0.6 + gust * 0.4;
+
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = 'rgb(200, 220, 255)';
+      ctx.beginPath();
+      ctx.arc(x, y, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Layer 3: Strong wind — large fast-moving wisps
+    if (str >= 1.0) {
+      const wispCount = Math.floor(3 + (str - 1.0) * 8);
+      for (let i = 0; i < wispCount; i++) {
+        const seed = i * 331.7 + 77;
+        const seed2 = i * 157.3 + 53;
+        const speed = effectiveStrength * (90 + (seed % 60));
+        const rawX = seed * 4.1 + t * speed * wdx;
+        const rawY = seed2 * 2.9 + t * speed * wdy;
+        const baseX = ((rawX % this.width) + this.width) % this.width;
+        const baseY = ((rawY % this.height) + this.height) % this.height;
+
+        const wispLen = (60 + str * 60 + (seed % 40)) * gust;
+        const wavePhase = t * 1.2 + seed * 0.05;
+        const waveAmp = 8 + gust * 6;
+
+        const wispAlpha = 0.02 + (seed % 50) / 50 * 0.04 * gust;
+
+        ctx.beginPath();
+        ctx.strokeStyle = `rgba(200, 225, 255, ${wispAlpha})`;
+        ctx.lineWidth = 1.5 + gust * 1.5;
+
+        const sx = baseX;
+        const sy = baseY;
+        const cx1 = baseX + wdx * wispLen * 0.33 + pdx * Math.sin(wavePhase) * waveAmp;
+        const cy1 = baseY + wdy * wispLen * 0.33 + pdy * Math.sin(wavePhase) * waveAmp;
+        const cx2 = baseX + wdx * wispLen * 0.66 + pdx * Math.sin(wavePhase + 1.5) * waveAmp;
+        const cy2 = baseY + wdy * wispLen * 0.66 + pdy * Math.sin(wavePhase + 1.5) * waveAmp;
+        const ex = baseX + wdx * wispLen;
+        const ey = baseY + wdy * wispLen;
+
+        ctx.moveTo(sx, sy);
+        ctx.bezierCurveTo(cx1, cy1, cx2, cy2, ex, ey);
+        ctx.stroke();
+      }
+    }
+
     ctx.globalAlpha = 1;
   }
 
