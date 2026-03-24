@@ -5,11 +5,11 @@
 
 // Flower color palette (soft, distinct from pheromone colors)
 const FLOWER_COLORS = {
-  green:  [140, 60, 55],  // [h, s%, l%]
-  purple: [280, 50, 60],
-  pink:   [330, 55, 60],
-  blue:   [210, 50, 55],
-  white:  [60, 20, 75],
+  green:  [140, 50, 52],  // [h, s%, l%] — slightly muted
+  purple: [280, 40, 57],
+  pink:   [330, 45, 57],
+  blue:   [210, 40, 52],
+  white:  [60, 15, 72],
 };
 
 // Zone visual styles

@@ -11,18 +11,18 @@ class ParticleSystem {
 
   // Ambient dust — always present, respawns
   spawnAmbientDust(canvasWidth, canvasHeight, count) {
-    count = count || 25;
+    count = count || 14;
     for (let i = 0; i < count; i++) {
       this.particles.push({
         type: 'dust',
         x: this.rng.range(0, canvasWidth),
         y: this.rng.range(0, canvasHeight),
-        vx: this.rng.range(-0.15, 0.15),
-        vy: this.rng.range(-0.15, 0.15),
+        vx: this.rng.range(-0.08, 0.08),
+        vy: this.rng.range(-0.08, 0.08),
         life: Infinity,
         maxLife: Infinity,
-        alpha: this.rng.range(0.03, 0.08),
-        size: this.rng.range(0.5, 1.5),
+        alpha: this.rng.range(0.02, 0.05),
+        size: this.rng.range(0.3, 2.0),
         color: [255, 240, 220],
         canvasWidth,
         canvasHeight,
@@ -149,10 +149,10 @@ class ParticleSystem {
         if (p.y < 0) p.y = p.canvasHeight;
         if (p.y > p.canvasHeight) p.y = 0;
         // Slight drift variation
-        p.vx += (Math.random() - 0.5) * 0.01;
-        p.vy += (Math.random() - 0.5) * 0.01;
-        p.vx = clamp(p.vx, -0.3, 0.3);
-        p.vy = clamp(p.vy, -0.3, 0.3);
+        p.vx += (Math.random() - 0.5) * 0.005;
+        p.vy += (Math.random() - 0.5) * 0.005;
+        p.vx = clamp(p.vx, -0.15, 0.15);
+        p.vy = clamp(p.vy, -0.15, 0.15);
         continue;
       }
 

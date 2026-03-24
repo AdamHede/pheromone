@@ -25,10 +25,10 @@ class Renderer {
     this.PHEROMONE_RENDER_INTERVAL = 2;
 
     // Pre-rendered glow sprites (at DPR resolution for crisp gradients)
-    this.beeGlowSearching = this._createGlowSprite(9, [255, 235, 180], 0.7);
-    this.beeGlowReturning = this._createGlowSprite(12, [255, 200, 80], 0.9);
-    this.beeGlowFollowing = this._createGlowSprite(10, [255, 215, 120], 0.8);
-    this.hiveGlowSprite = this._createGlowSprite(70, [255, 190, 80], 0.6);
+    this.beeGlowSearching = this._createGlowSprite(7, [255, 235, 180], 0.5);
+    this.beeGlowReturning = this._createGlowSprite(9, [255, 200, 80], 0.7);
+    this.beeGlowFollowing = this._createGlowSprite(8, [255, 215, 120], 0.6);
+    this.hiveGlowSprite = this._createGlowSprite(50, [255, 190, 80], 0.5);
     this.waspGlowSprite = this._createGlowSprite(20, [255, 50, 50], 0.8);
 
     // Background grain (intentionally low-res, stays at logical/4)
@@ -64,10 +64,14 @@ class Renderer {
     this.shakeOffsetY = 0;
     this.shakeIntensity = 0;
 
-    this.beeGlowSearching = this._createGlowSprite(9, [255, 235, 180], 0.7);
-    this.beeGlowReturning = this._createGlowSprite(12, [255, 200, 80], 0.9);
-    this.beeGlowFollowing = this._createGlowSprite(10, [255, 215, 120], 0.8);
-    this.hiveGlowSprite = this._createGlowSprite(70, [255, 190, 80], 0.6);
+    // Invalidate cached gradients on resize
+    this._bgGradient = null;
+    this._vignetteGradient = null;
+
+    this.beeGlowSearching = this._createGlowSprite(7, [255, 235, 180], 0.5);
+    this.beeGlowReturning = this._createGlowSprite(9, [255, 200, 80], 0.7);
+    this.beeGlowFollowing = this._createGlowSprite(8, [255, 215, 120], 0.6);
+    this.hiveGlowSprite = this._createGlowSprite(50, [255, 190, 80], 0.5);
     this.waspGlowSprite = this._createGlowSprite(20, [255, 50, 50], 0.8);
 
     this.grainCanvas.width = Math.ceil(this.width / 4);
@@ -101,11 +105,13 @@ class Renderer {
         const r = lerp(eR, rR, recRatio);
         const g = lerp(eG, rG, recRatio);
         const b = lerp(eB, rB, recRatio);
-        const brightness = clamp(total * 2.5, 0, 1);
+        const rawBright = clamp(total * 3.0, 0, 1);
+        // Steeper curve: dim areas dimmer, bright areas slightly brighter
+        const brightness = rawBright * rawBright * (3 - 2 * rawBright); // smoothstep
         const R = (r * brightness * 255) | 0;
         const G = (g * brightness * 255) | 0;
         const B = (b * brightness * 255) | 0;
-        const A = (brightness * 255) | 0;
+        const A = (brightness * 220) | 0; // slightly lower alpha ceiling
         this._pheromoneLUT[ei * 64 + ri] = (A << 24) | (B << 16) | (G << 8) | R;
       }
     }
@@ -241,7 +247,16 @@ class Renderer {
   }
 
   _drawBackground(ctx) {
-    ctx.fillStyle = 'hsl(220, 12%, 3%)';
+    // Subtle radial gradient — warmer center, dark edges
+    if (!this._bgGradient) {
+      this._bgGradient = ctx.createRadialGradient(
+        this.width / 2, this.height / 2, 0,
+        this.width / 2, this.height / 2, this.width * 0.7
+      );
+      this._bgGradient.addColorStop(0, 'hsl(220, 10%, 6%)');
+      this._bgGradient.addColorStop(1, 'hsl(220, 12%, 2%)');
+    }
+    ctx.fillStyle = this._bgGradient;
     ctx.fillRect(0, 0, this.width, this.height);
 
     this.grainCounter++;
@@ -250,9 +265,21 @@ class Renderer {
       this.grainTime += 0.5;
       this._updateGrain();
     }
-    ctx.globalAlpha = 0.03;
+    ctx.globalAlpha = 0.015;
     ctx.drawImage(this.grainCanvas, 0, 0, this.width, this.height);
     ctx.globalAlpha = 1;
+
+    // Soft vignette — dark edges draw the eye inward
+    if (!this._vignetteGradient) {
+      this._vignetteGradient = ctx.createRadialGradient(
+        this.width / 2, this.height / 2, this.height * 0.3,
+        this.width / 2, this.height / 2, this.width * 0.85
+      );
+      this._vignetteGradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+      this._vignetteGradient.addColorStop(1, 'rgba(0, 0, 0, 0.3)');
+    }
+    ctx.fillStyle = this._vignetteGradient;
+    ctx.fillRect(0, 0, this.width, this.height);
   }
 
   _updateGrain() {
@@ -275,43 +302,30 @@ class Renderer {
     for (const zone of zones) {
       const style = zone.visualStyle;
       const hsl = style.color;
-      const pulse = 0.5 + Math.sin(timestamp * 0.001) * 0.05;
 
-      if (zone.type === 'no-hive') {
-        // Solid translucent fill with subtle animated border
-        ctx.fillStyle = hslToString(hsl[0], hsl[1], hsl[2], 0.12);
-        ctx.strokeStyle = hslToString(hsl[0], hsl[1], hsl[2] + 20, 0.25 * pulse);
-        ctx.lineWidth = 1.5;
-      } else if (zone.type === 'slow') {
-        // Hatched appearance for slow zones
-        ctx.fillStyle = hslToString(hsl[0], hsl[1], hsl[2], 0.08);
-        ctx.strokeStyle = hslToString(hsl[0], hsl[1], hsl[2] + 15, 0.2);
-        ctx.lineWidth = 1;
-      }
+      const baseAlpha = zone.type === 'no-hive' ? 0.07 : 0.05;
 
       if (zone.shape === 'rect') {
-        ctx.fillRect(zone.x, zone.y, zone.w, zone.h);
-        ctx.strokeRect(zone.x, zone.y, zone.w, zone.h);
-
-        // Label
-        ctx.globalAlpha = 0.15;
-        ctx.fillStyle = hslToString(hsl[0], hsl[1], hsl[2] + 30, 1);
-        ctx.font = '9px "Space Mono", monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(style.label, zone.x + zone.w / 2, zone.y + zone.h / 2 + 3);
-        ctx.globalAlpha = 1;
+        // Feathered rectangle — gradient fade at edges
+        const cx = zone.x + zone.w / 2;
+        const cy = zone.y + zone.h / 2;
+        const gr = Math.max(zone.w, zone.h) * 0.6;
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, gr);
+        grad.addColorStop(0, hslToString(hsl[0], hsl[1], hsl[2], baseAlpha));
+        grad.addColorStop(0.7, hslToString(hsl[0], hsl[1], hsl[2], baseAlpha * 0.5));
+        grad.addColorStop(1, hslToString(hsl[0], hsl[1], hsl[2], 0));
+        ctx.fillStyle = grad;
+        ctx.fillRect(zone.x - 20, zone.y - 20, zone.w + 40, zone.h + 40);
       } else if (zone.shape === 'circle') {
+        // Feathered circle — radial gradient fade
+        const grad = ctx.createRadialGradient(zone.x, zone.y, 0, zone.x, zone.y, zone.r * 1.3);
+        grad.addColorStop(0, hslToString(hsl[0], hsl[1], hsl[2], baseAlpha));
+        grad.addColorStop(0.6, hslToString(hsl[0], hsl[1], hsl[2], baseAlpha * 0.5));
+        grad.addColorStop(1, hslToString(hsl[0], hsl[1], hsl[2], 0));
+        ctx.fillStyle = grad;
         ctx.beginPath();
-        ctx.arc(zone.x, zone.y, zone.r, 0, Math.PI * 2);
+        ctx.arc(zone.x, zone.y, zone.r * 1.3, 0, Math.PI * 2);
         ctx.fill();
-        ctx.stroke();
-
-        ctx.globalAlpha = 0.15;
-        ctx.fillStyle = hslToString(hsl[0], hsl[1], hsl[2] + 30, 1);
-        ctx.font = '9px "Space Mono", monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(style.label, zone.x, zone.y + 3);
-        ctx.globalAlpha = 1;
       }
     }
   }
@@ -449,7 +463,7 @@ class Renderer {
 
       const bandLen = 250 + str * 200;
       const bandWidth = 50 + (seed % 40);
-      const alpha = 0.025 + gust * 0.03;
+      const alpha = 0.015 + gust * 0.02;
 
       ctx.globalAlpha = alpha;
       ctx.fillStyle = 'rgb(150, 185, 235)';
@@ -486,7 +500,7 @@ class Renderer {
     const h = this.height;
 
     // === Layer 1: Flowing streaks ===
-    const streakCount = Math.floor(15 + str * 30 + gust * 10);
+    const streakCount = Math.floor(10 + str * 18 + gust * 6);
     ctx.lineCap = 'round';
 
     for (let i = 0; i < streakCount; i++) {
@@ -504,11 +518,11 @@ class Renderer {
       const wavePhase = t * (1.5 + str) + seed * 0.1;
       const waveAmp = 3 + gust * 4 + str * 5;
 
-      const brightness = 0.04 + (seed % 100) / 100 * 0.08 * (0.5 + str);
+      const brightness = 0.03 + (seed % 100) / 100 * 0.055 * (0.5 + str);
 
       ctx.beginPath();
       ctx.strokeStyle = `rgba(180, 210, 255, ${brightness})`;
-      ctx.lineWidth = 0.5 + str * 0.8 + gust * 0.4;
+      ctx.lineWidth = 0.3 + str * 0.5 + gust * 0.3;
 
       const sx = baseX;
       const sy = baseY;
@@ -523,7 +537,7 @@ class Renderer {
     }
 
     // === Layer 2: Drifting dust dots ===
-    const dotCount = Math.floor(8 + str * 20 + gust * 8);
+    const dotCount = Math.floor(5 + str * 12 + gust * 5);
     for (let i = 0; i < dotCount; i++) {
       const seed = i * 271.1 + 99;
       const speed = (0.3 + effectiveStrength) * (30 + (seed % 50));
@@ -686,12 +700,13 @@ class Renderer {
       if (!bee.dead || bee.deathTimer <= 0) continue;
 
       const t = bee.deathTimer / 20; // 1.0 -> 0.0
-      const size = 3 * t;
-      ctx.globalAlpha = t * 0.7;
-      ctx.fillStyle = `rgb(255, ${Math.floor(80 * t)}, ${Math.floor(30 * t)})`;
+      const size = 2 + (1 - t) * 4; // expands outward
+      ctx.globalAlpha = t * 0.5;
+      ctx.strokeStyle = `rgba(255, 160, 80, ${t})`;
+      ctx.lineWidth = 0.8;
       ctx.beginPath();
       ctx.arc(bee.x, bee.y, size, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.stroke();
     }
     ctx.globalAlpha = 1;
   }
@@ -729,19 +744,15 @@ class Renderer {
 
   _drawObstacles(ctx, obstacles) {
     if (!obstacles) return;
-    ctx.strokeStyle = 'rgba(80, 90, 110, 0.15)';
-    ctx.lineWidth = 1;
-    ctx.fillStyle = 'rgba(40, 45, 55, 0.2)';
+    ctx.fillStyle = 'rgba(40, 45, 55, 0.08)';
 
     for (const obs of obstacles) {
       if (obs.type === 'rect') {
         ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
-        ctx.strokeRect(obs.x, obs.y, obs.w, obs.h);
       } else if (obs.type === 'circle') {
         ctx.beginPath();
         ctx.arc(obs.x, obs.y, obs.r, 0, Math.PI * 2);
         ctx.fill();
-        ctx.stroke();
       }
     }
   }
@@ -749,60 +760,74 @@ class Renderer {
   _drawFlowers(ctx, flowers, timestamp) {
     if (!flowers) return;
     for (const flower of flowers) {
-      if (flower.resource <= 0) continue;
+      const resourceFraction = flower.resource / flower.maxResource;
+      // Fade out over last 20% of resource instead of hard cutoff
+      if (resourceFraction <= 0) continue;
+      const depletionFade = resourceFraction < 0.2 ? resourceFraction / 0.2 : 1;
 
-      const brightness = flower.resource / flower.maxResource;
-      const baseAlpha = 0.15 + brightness * 0.85;
+      const brightness = resourceFraction;
+      const baseAlpha = (0.2 + brightness * 0.8) * depletionFade;
       const radius = (6 + brightness * 6);
 
       let pulseScale = 1;
       if (flower.harvestPulse > 0) {
-        pulseScale = 1 + flower.harvestPulse * 0.3;
+        pulseScale = 1 + flower.harvestPulse * 0.2;
         flower.harvestPulse *= 0.85;
         if (flower.harvestPulse < 0.01) flower.harvestPulse = 0;
       }
 
-      const idlePulse = 1 + Math.sin(timestamp * 0.002 + flower.x * 0.01) * 0.05;
+      const idlePulse = 1 + Math.sin(timestamp * 0.0015 + flower.x * 0.01) * 0.04;
       const finalRadius = radius * pulseScale * idlePulse;
 
-      const rgb = flower.rgbColor;
-      const hsl = rgb;
-      const glowColor = hslToString(hsl[0], hsl[1], hsl[2], baseAlpha * 0.3);
-      const coreColor = hslToString(hsl[0], hsl[1], Math.min(hsl[2] + 15, 90), baseAlpha);
-      const petalColor = hslToString(hsl[0], hsl[1], Math.min(hsl[2] + 5, 80), baseAlpha * 0.8);
+      const hsl = flower.rgbColor;
 
+      // Soft radial gradient glow (replaces hard circle)
+      const glowR = finalRadius * 3;
+      const glow = ctx.createRadialGradient(flower.x, flower.y, 0, flower.x, flower.y, glowR);
+      glow.addColorStop(0, hslToString(hsl[0], hsl[1], hsl[2], baseAlpha * 0.12));
+      glow.addColorStop(0.5, hslToString(hsl[0], hsl[1], hsl[2], baseAlpha * 0.04));
+      glow.addColorStop(1, hslToString(hsl[0], hsl[1], hsl[2], 0));
+      ctx.fillStyle = glow;
       ctx.beginPath();
-      ctx.arc(flower.x, flower.y, finalRadius * 2, 0, Math.PI * 2);
-      ctx.fillStyle = glowColor;
+      ctx.arc(flower.x, flower.y, glowR, 0, Math.PI * 2);
       ctx.fill();
 
-      const petalCount = 6;
-      const petalLength = finalRadius * 1.4;
+      // Petals — 5, smaller, more translucent
+      const petalCount = 5;
+      const petalLength = finalRadius * 1.2;
+      const petalColor = hslToString(hsl[0], hsl[1], Math.min(hsl[2] + 5, 80), baseAlpha * 0.5);
       ctx.fillStyle = petalColor;
       for (let i = 0; i < petalCount; i++) {
-        const angle = timestamp * 0.0005 + (i * Math.PI * 2) / petalCount;
-        const px = flower.x + Math.cos(angle) * petalLength * 0.5;
-        const py = flower.y + Math.sin(angle) * petalLength * 0.5;
+        const angle = timestamp * 0.0002 + (i * Math.PI * 2) / petalCount;
+        const px = flower.x + Math.cos(angle) * petalLength * 0.45;
+        const py = flower.y + Math.sin(angle) * petalLength * 0.45;
         ctx.beginPath();
-        ctx.arc(px, py, finalRadius * 0.6, 0, Math.PI * 2);
+        ctx.arc(px, py, finalRadius * 0.45, 0, Math.PI * 2);
         ctx.fill();
       }
 
+      // Core
       ctx.beginPath();
-      ctx.arc(flower.x, flower.y, finalRadius * 0.7, 0, Math.PI * 2);
-      ctx.fillStyle = coreColor;
+      ctx.arc(flower.x, flower.y, finalRadius * 0.55, 0, Math.PI * 2);
+      ctx.fillStyle = hslToString(hsl[0], hsl[1], Math.min(hsl[2] + 15, 90), baseAlpha * 0.8);
+      ctx.fill();
+
+      // Bright center pistil — tiny jewel-like dot
+      ctx.beginPath();
+      ctx.arc(flower.x, flower.y, 1.5, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 255, 240, ${baseAlpha * 0.7})`;
       ctx.fill();
     }
   }
 
   _drawHives(ctx, hives, timestamp) {
     for (const hive of hives) {
-      const pulse = Math.sin(timestamp * 0.003) * 0.15 + 1;
-      const flashBoost = hive.flashTimer > 0 ? (hive.flashTimer / 8) * 0.5 : 0;
+      const pulse = Math.sin(timestamp * 0.0015) * 0.08 + 1;
+      const flashBoost = hive.flashTimer > 0 ? (hive.flashTimer / 8) * 0.4 : 0;
       const deliveryBoost = hive.pulseT || 0;
 
-      const glowSize = 70 * pulse + (deliveryBoost * 20);
-      ctx.globalAlpha = 0.4 + flashBoost;
+      const glowSize = 50 * pulse + (deliveryBoost * 15);
+      ctx.globalAlpha = 0.35 + flashBoost;
       ctx.drawImage(
         this.hiveGlowSprite,
         hive.x - glowSize,
@@ -813,13 +838,13 @@ class Renderer {
       ctx.globalAlpha = 1;
 
       const radius = 14 * pulse + (deliveryBoost * 3);
-      const lightness = 55 + flashBoost * 30 + deliveryBoost * 20;
+      const lightness = 55 + flashBoost * 25 + deliveryBoost * 15;
 
       const drawHex = (x, y, r, color) => {
         ctx.fillStyle = color;
         ctx.beginPath();
         for (let i = 0; i < 6; i++) {
-          const angle = (i * Math.PI) / 3 + (timestamp * 0.0005);
+          const angle = (i * Math.PI) / 3 + (timestamp * 0.0003);
           const hx = x + Math.cos(angle) * r;
           const hy = y + Math.sin(angle) * r;
           if (i === 0) ctx.moveTo(hx, hy);
@@ -831,25 +856,6 @@ class Renderer {
 
       drawHex(hive.x, hive.y, radius, hslToString(35, 80, lightness, 0.9));
       drawHex(hive.x, hive.y, radius * 0.5, hslToString(40, 70, 80 + flashBoost * 15, 0.6));
-
-      ctx.fillStyle = hslToString(35, 90, lightness + 10, 0.5);
-      for (let i = 0; i < 6; i++) {
-        const angle = (i * Math.PI) / 3 + (timestamp * 0.0005);
-        const subR = radius * 0.6;
-        const subX = hive.x + Math.cos(angle) * subR;
-        const subY = hive.y + Math.sin(angle) * subR;
-        ctx.beginPath();
-        for (let j = 0; j < 6; j++) {
-            const angle2 = (j * Math.PI) / 3 + (timestamp * 0.0005);
-            const hexR = radius * 0.25;
-            const hx = subX + Math.cos(angle2) * hexR;
-            const hy = subY + Math.sin(angle2) * hexR;
-            if (j === 0) ctx.moveTo(hx, hy);
-            else ctx.lineTo(hx, hy);
-        }
-        ctx.closePath();
-        ctx.fill();
-      }
 
       if (hive.flashTimer > 0) hive.flashTimer--;
     }
@@ -879,10 +885,10 @@ class Renderer {
       let sprite, spriteSize;
       if (bee.state === BeeState.RETURNING) {
         sprite = this.beeGlowReturning;
-        spriteSize = 12;
+        spriteSize = 9;
       } else {
         sprite = this.beeGlowSearching;
-        spriteSize = 9;
+        spriteSize = 7;
       }
 
       ctx.drawImage(sprite, bee.x - spriteSize, bee.y - spriteSize, spriteSize * 2, spriteSize * 2);
